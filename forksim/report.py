@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
 from pathlib import Path
 
 from .config import nominal
@@ -104,14 +103,13 @@ def main(argv=None) -> None:
         ax.set_xlim(0, 100)
         ax.set_xlabel(f"pallets loaded %  (black line = all errors at {stress:g}x)")
         ax.set_title(NICE[ctrl])
-    axes[1].legend(loc="lower left", fontsize=9)
+    axes[1].legend(loc="upper left", fontsize=9)
     fig.suptitle(f"Which single error source matters? One changed at a time, the rest held at {stress:g}x nominal")
     fig.savefig(out / "fig2_sensitivity.png", dpi=130, bbox_inches="tight")
     plt.close(fig)
 
-    # ---- 3. the two alignment errors when the forks reach the pallet, and their tolerance envelope
+    # ---- 3. the two alignment errors when the forks reach the pallet
     tol = tolerance_mm()
-    depth = nominal().forklift.fork_length
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.6), sharey=True, sharex=True)
     for ax, ctrl in zip(axes, ctrls):
         rows = [t for t in trials if t["exp"] == "headline" and t["label"] == "stressed" and t["controller"] == ctrl]
@@ -119,9 +117,10 @@ def main(argv=None) -> None:
             sel = [t for t in rows if (t["success"] == "True") == ok and _num(t["entry_lat_mm"]) == _num(t["entry_lat_mm"])]
             ax.scatter([_num(t["entry_angle_deg"]) for t in sel], [_num(t["entry_lat_mm"]) for t in sel],
                        s=8, color=color, alpha=0.6, label=f"{name} ({len(sel)})")
-        # forks stay inside the pockets while |lat| <= tol and |lat + depth*tan(angle)| <= tol
-        a = math.degrees(math.atan(2 * tol / 1e3 / depth))
-        ax.plot([0, a, 0, -a, 0], [tol, -tol, -tol, tol, tol], "k--", lw=1, label="straight-in tolerance")
+        # the room a fork has in its pocket. The angle is not a hard limit here: the truck keeps
+        # steering while it drives in, and it pivots near its fork tips, so it can still straighten up.
+        ax.axhline(tol, color="k", ls="--", lw=1, label=f"fork clearance +/-{tol:.0f} mm")
+        ax.axhline(-tol, color="k", ls="--", lw=1)
         never = sum(1 for t in rows if _num(t["entry_lat_mm"]) != _num(t["entry_lat_mm"]))
         ax.set_title(f"{NICE[ctrl]}\n({never} of {len(rows)} trials never got the forks to the edge)", fontsize=10)
         ax.set_xlabel("angle: pallet edge vs carriage face (deg)")
@@ -130,8 +129,8 @@ def main(argv=None) -> None:
         ax.grid(alpha=0.3)
         ax.legend(fontsize=8, loc="upper right")
     axes[0].set_ylabel("lateral offset at entry edge (mm)")
-    fig.suptitle(f"The two alignment errors, ground truth, as the fork tips cross the entry edge (errors at {stress:g}x)")
-    fig.savefig(out / "fig3_envelope.png", dpi=130, bbox_inches="tight")
+    fig.suptitle(f"The two alignment errors, ground truth, as the fork tips cross the entry edge (errors at {stress:g}x)", y=1.04)
+    fig.savefig(out / "fig3_alignment.png", dpi=130, bbox_inches="tight")
     plt.close(fig)
 
     # ---- 4. how trials end
