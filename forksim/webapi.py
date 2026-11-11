@@ -13,7 +13,7 @@ from dataclasses import replace
 import numpy as np
 
 from .behaviors import CONTROLLERS
-from .config import Variation, nominal, override, scaled
+from .config import Variation, limits, nominal, override, scaled, validate
 from .geometry import compose, relative
 from .trial import TrialRunner, run_trial
 
@@ -47,12 +47,16 @@ def _r(x, nd=3):
     return None if x != x else round(float(x), nd)
 
 
+def _limits(cfg) -> dict:
+    return {path: [round(lo, 3), round(hi, 3)] for path, (lo, hi) in limits(cfg).items()}
+
+
 def describe() -> str:
     """Defaults for the Properties tab."""
     cfg = nominal()
     groups = [[title, [[label, path, unit, step, getattr(getattr(cfg, path.split(".")[0]), path.split(".")[1])]
                        for label, path, unit, step in rows]] for title, rows in PROPERTIES]
-    return json.dumps(dict(groups=groups, controllers=list(CONTROLLERS)))
+    return json.dumps(dict(groups=groups, controllers=list(CONTROLLERS), limits=_limits(cfg)))
 
 
 def start(params_json: str) -> str:
@@ -60,6 +64,9 @@ def start(params_json: str) -> str:
     global _run, _scan_id
     p = json.loads(params_json)
     cfg = _config(p)
+    problems = validate(cfg)
+    if problems:
+        return json.dumps(dict(error=problems, limits=_limits(cfg)))   # nothing started; say why
     manual = p.get("controller") == "manual"
     _run = TrialRunner(cfg, "actuator_aware" if manual else p["controller"], int(p.get("trial", 0)),
                        int(p.get("seed", 0)), manual=manual)
@@ -73,7 +80,7 @@ def start(params_json: str) -> str:
                     blocks=[list(b) for b in pl.blocks], weight=pl.weight_kg),
         truck=dict(body_rear=f.body_rear, width=f.width, heel=f.fork_heel, reach=f.reach, fork_width=f.fork_width,
                    fork_spacing=f.fork_spacing, wheelbase=f.wheelbase, rated_load=f.rated_load_kg),
-        approach_distance=cfg.task.approach_distance))
+        approach_distance=cfg.task.approach_distance, limits=_limits(cfg)))
 
 
 def _world(pose_true, odom, pt):
@@ -135,6 +142,9 @@ def batch(params_json: str, first: int, count: int) -> str:
     """Run `count` trials starting at index `first` for every controller; returns outcomes."""
     p = json.loads(params_json)
     cfg = _config(p)
+    problems = validate(cfg)
+    if problems:
+        return json.dumps(dict(error=problems))
     out = {}
     for ctrl in CONTROLLERS:
         res = [run_trial(cfg, ctrl, k, int(p.get("seed", 0))) for k in range(first, first + count)]

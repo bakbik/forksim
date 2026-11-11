@@ -13,6 +13,7 @@ tests. There is one implementation, not a demo and a "real" one.
 
 - [Try it](#try-it)
 - [What is simulated](#what-is-simulated)
+- [Allowed inputs](#allowed-inputs)
 - [The task, step by step](#the-task-step-by-step)
 - [How a run is judged](#how-a-run-is-judged)
 - [Sources of error](#sources-of-error)
@@ -33,7 +34,7 @@ Open **<https://bakbik.github.io/forksim/>**. The page downloads Python
 | Tab | What it does |
 |---|---|
 | **Run** | Pick a driver, press **Start**. *Trial number* selects the situation: the same number always gives the same pallet pose, start pose and hidden errors. *Next trial* moves to a new one. Speed up to 15x. |
-| **Properties** | Room size; pallet position, angle, size and weight; truck start pose, max speed, max steer angle, minimum turning radius; approach distance **D**. *Apply and restart* to use them. |
+| **Properties** | Room size; pallet position, angle, size and weight; truck start pose, max speed, max steer angle, minimum turning radius; approach distance **D**. The allowed range is shown under each field; a value outside it is refused with a reason. *Apply and restart* to use them. |
 | **Errors** | Two sliders: how wrong perception is and how badly the truck obeys, from 0 (ideal simulator) through 1 (assumed real truck) to 3. |
 | **Batch** | Runs 10 to 40 trials for both drivers with the current settings and tabulates how each ended. |
 
@@ -57,7 +58,7 @@ What you are looking at:
 Things worth trying: put the pallet at angle 0 so the truck starts facing a
 *side* edge and has to work out where the entry edges are; shrink **D** to 0.5 m
 and watch the accepted angle shrink with it; push the Errors sliders to 2 and
-compare the two drivers in Batch; set the pallet weight above 1500 kg.
+compare the two drivers in Batch; narrow the pallet to 0.77 m, the tightest fit the forks allow.
 
 ### On your machine
 
@@ -96,6 +97,35 @@ python -m pytest -q
 
 The forks are 170 mm wide and the pockets 227.5 mm, so a fork has **25 mm of
 room on each side**. That number sets how hard the task is.
+
+## Allowed inputs
+
+A configuration outside these ranges is rejected before anything runs:
+`TrialRunner` raises `ValueError`, the web page refuses to start and says which
+value is wrong, and `forksim.validate(cfg)` returns the list of problems.
+`forksim.limits(cfg)` returns the ranges for a given configuration, because
+several of them follow from other values rather than being fixed numbers.
+
+| Property | Allowed | Why |
+|---|---|---|
+| Pallet size y (entry edge) | 0.77 to 2.5 m | Lower bound is computed: the forks at their 550 mm outer width, plus both 100 mm outer blocks, plus 10 mm clearance each side. Narrower and the forks cannot enter. Fit 680 mm forks and it becomes 0.90 m. |
+| Pallet size x (along forks) | 0.6 to 2.5 m | From a half pallet up to well past any standard one |
+| Pallet size z | 0.10 to 0.25 m | Not used by the 2D model |
+| Pallet weight | 1 to 1500 kg | Upper bound is the truck's rated load |
+| Pallet position | whole pallet at least 0.3 m inside the walls | Follows from room size and pallet size |
+| Pallet angle, truck start angle | any | |
+| Truck start position | at least 1 m inside the walls, and not on the pallet | |
+| Truck max speed | 0.1 to 2.0 m/s | Data sheet maximum |
+| Truck max steer angle | 10 to 90 deg | 90 deg is turning on the spot |
+| Truck minimum turning radius | 0 to 5 m | |
+| Approach distance D | 0.3 to 5 m | |
+| Accepted share of possible approach error | 0.1 to 1 | |
+| Room | 5 to 100 m each way | |
+
+Inside these ranges every pallet size was checked to load in the ideal
+simulator, at both ends of each range and in combination. Valid does not mean
+easy: at 0.77 m the forks have 10 mm to spare instead of 25 mm, and with
+realistic errors the truck scrapes a block.
 
 ## The task, step by step
 
@@ -199,7 +229,6 @@ Nothing else differs between them.
 | `collision_side` | The truck drove at a side (wrong) edge |
 | `collision_body` | The power unit hit the pallet |
 | a flag | See above |
-| `overload` | Docked correctly, but the pallet is heavier than the rated load |
 | `left_room`, `timeout` | Drove out of the room, or ran past 90 s |
 
 The collision check is deliberately naive: it samples the outline of the forks
@@ -334,8 +363,9 @@ What the simulation does not capture, and what it should not be trusted for.
   position, steering lock and all actuator dynamics.
 - **The baseline is deliberately naive.** It shows what the ideal simulator
   fails to warn about; it is not a claim about any production controller.
-- **Lifting is not simulated.** "Loaded" means in position. Weight only decides
-  an overload check against the rated load.
+- **Lifting is not simulated.** "Loaded" means in position. Pallet weight is
+  checked against the truck's rated load as an input limit and otherwise has no
+  effect; pallet height has none.
 
 Reasonable uses: ranking error sources, finding which tolerance is the tight
 one, comparing two controllers on identical situations, regression-testing
@@ -418,7 +448,7 @@ forksim/
   report.py       figures and results table
   webapi.py       bridge used by the web page
 web/index.html    the simulator in a browser
-tests/            13 checks, about 20 s
+tests/            14 checks, about 20 s
 ```
 
 Built with an AI coding assistant.

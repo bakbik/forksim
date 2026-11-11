@@ -36,7 +36,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 
 from .behaviors import FLAGS, BehaviorParams, PickupBehavior
-from .config import SimConfig
+from .config import SimConfig, validate
 from .geometry import compose, rect_segments, relative, wrap_half
 from .mapping import LocalMap
 from .perception import LidarPalletEstimator, OraclePerception
@@ -47,7 +47,7 @@ COLLISIONS = ("collision_fork_face",   # a fork tip ran into the front of a bloc
               "collision_fork_wall",   # a fork scraped a block from inside its pocket: angular miss
               "collision_side",        # the truck drove at a side (wrong) edge
               "collision_body")        # the power unit hit the pallet
-OUTCOMES = ("success", *COLLISIONS, *FLAGS, "overload", "left_room", "timeout")
+OUTCOMES = ("success", *COLLISIONS, *FLAGS, "left_room", "timeout")
 NAN = float("nan")
 
 
@@ -91,6 +91,9 @@ class TrialRunner:
     def __init__(self, cfg: SimConfig, controller: str = "actuator_aware", trial: int = 0,
                  base_seed: int = 0, manual: bool = False, perception: str = "lidar",
                  ctrl_params: BehaviorParams | None = None):
+        problems = validate(cfg)
+        if problems:
+            raise ValueError("invalid configuration: " + "; ".join(problems))
         self.cfg, self.trial, self.manual = cfg, trial, manual
         streams = np.random.SeedSequence([base_seed, trial]).spawn(3)
         r_scn, self._r_sens, r_proc = (np.random.default_rng(s) for s in streams)
@@ -274,9 +277,6 @@ class TrialRunner:
                     return self._collide("collision_side" if side else "collision_body",
                                          "truck body hit the pallet")
                 self.ctrl.notify_loaded()
-                if self.cfg.pallet.weight_kg > vg.rated_load_kg:
-                    self.alert = "pallet is heavier than the truck's rated load"
-                    return self._finish("overload")
                 return self._finish("success")
         if finished and self.ctrl.flag:
             self.alert = f"behaviour raised flag: {self.ctrl.flag}"

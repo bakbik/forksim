@@ -17,7 +17,7 @@ SIM = {"ideal": "ideal sim", "nominal": "assumed real truck (1x)", "stressed": "
 COLORS = {"success": "#2a9d8f", "collision_fork_face": "#e76f51", "collision_fork_wall": "#f4a261",
           "collision_side": "#9b2226", "collision_body": "#bc4749", "no_pallet_detected": "#6d597a",
           "no_approach_position": "#b5838d", "approach_error_too_large": "#e9c46a", "lost_pallet": "#8d99ae",
-          "overload": "#495057", "left_room": "#adb5bd", "timeout": "#264653"}
+          "left_room": "#adb5bd", "timeout": "#264653"}
 
 
 def tolerance_mm() -> float:

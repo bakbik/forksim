@@ -217,3 +217,50 @@ def override(cfg: SimConfig, changes: dict) -> SimConfig:
         else:
             cfg = replace(cfg, **{path: value})
     return cfg
+
+
+# ------------------------------------------------------------------ what counts as valid input
+MIN_FORK_CLEARANCE = 0.010   # m a fork must have on each side inside its pocket, nominally
+
+
+def limits(cfg: SimConfig) -> dict:
+    """Allowed (min, max) for every property a user may set. Several follow from other
+    properties: a pallet must be wide enough for these forks, light enough for this
+    truck, and inside this room."""
+    f, pl, room = cfg.forklift, cfg.pallet, cfg.room
+    edge = 0.5 * math.hypot(pl.length, pl.width) + 0.3            # keep the whole pallet off the walls
+    return {
+        "room.width": (5.0, 100.0),
+        "room.height": (5.0, 100.0),
+        "pallet.x": (edge, room.width - edge),
+        "pallet.y": (edge, room.height - edge),
+        "pallet.angle_deg": (-360.0, 360.0),
+        "pallet.length": (0.6, 2.5),
+        # the two forks, at their outer width, must fit between the outer blocks with clearance
+        "pallet.width": (round(f.fork_outer_width + 2.0 * (pl.outer_block + MIN_FORK_CLEARANCE), 3), 2.5),
+        "pallet.height": (0.10, 0.25),
+        "pallet.weight_kg": (1.0, f.rated_load_kg),
+        "forklift.x": (1.0, room.width - 1.0),
+        "forklift.y": (1.0, room.height - 1.0),
+        "forklift.angle_deg": (-360.0, 360.0),
+        "forklift.max_speed": (0.1, 2.0),
+        "forklift.max_steer_deg": (10.0, 90.0),
+        "forklift.min_turn_radius": (0.0, 5.0),
+        "task.approach_distance": (0.3, 5.0),
+        "task.handover_margin": (0.1, 1.0),
+    }
+
+
+def validate(cfg: SimConfig) -> list:
+    """Everything wrong with a configuration, in words. Empty list = valid."""
+    problems = []
+    for path, (lo, hi) in limits(cfg).items():
+        group, name = path.split(".")
+        value = getattr(getattr(cfg, group), name)
+        if not lo <= value <= hi:
+            problems.append(f"{path} = {value:g} is outside the allowed range {lo:g} to {hi:g}")
+    f, pl = cfg.forklift, cfg.pallet
+    apart = 0.5 * math.hypot(pl.length, pl.width) + f.length
+    if math.hypot(f.x - pl.x, f.y - pl.y) < apart:
+        problems.append(f"the truck starts on top of the pallet: keep their positions at least {apart:.2f} m apart")
+    return problems

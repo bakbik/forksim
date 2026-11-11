@@ -65,6 +65,10 @@ td, th { padding: 4px 0; border-bottom: 1px solid var(--line); text-align: left;
 td.n, th.n { text-align: right; font-family: var(--mono); font-size: 12.5px; }
 th { color: var(--muted); font-size: 12px; }
 .hint { color: var(--muted); font-size: 12.5px; margin: 6px 0; }
+.range { display: block; color: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.row input.bad { border-color: var(--bad); }
+.problems { color: var(--bad); font-size: 12.5px; margin: 6px 0; padding-left: 18px; }
+.problems:empty { display: none; }
 .check { display: flex; gap: 7px; align-items: center; margin: 4px 0; }
 .check input { accent-color: var(--accent); }
 kbd { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--bg); }
@@ -147,8 +151,10 @@ kbd { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--line)
 
     <div class="pane" id="tab-props">
       <div id="props"></div>
+      <ul class="problems" id="problems" role="alert"></ul>
       <div class="btns"><button class="btn primary" id="apply">Apply and restart</button><button class="btn" id="defaults">Defaults</button></div>
       <p class="hint">Origin is the bottom-left corner of the room. Angles are counter-clockwise from the x axis. The pallet angle is the direction forks travel through it.</p>
+      <p class="hint">The allowed range is shown under each name. Some ranges follow from other values: the pallet must be wide enough for the forks, no heavier than the truck's rated load, and inside the room.</p>
     </div>
 
     <div class="pane" id="tab-errors">
@@ -208,10 +214,21 @@ function buildProps(d) {
     h += `<h2>${title}</h2>`;
     for (const [label, path, unit, step, value] of rows) {
       defaults[path] = value;
-      h += `<div class="row"><label for="p-${path}">${label}</label><input type="number" id="p-${path}" data-path="${path}" step="${step}" value="${value}"><span class="unit">${unit}</span></div>`;
+      h += `<div class="row"><label for="p-${path}">${label}<span class="range" data-range="${path}"></span></label><input type="number" id="p-${path}" data-path="${path}" step="${step}" value="${value}"><span class="unit">${unit}</span></div>`;
     }
   }
   $("props").innerHTML = h;
+  showLimits(d.limits);
+}
+// allowed range under every field; some ranges depend on other fields, so this is refreshed on every apply
+function showLimits(lim) {
+  for (const [path, [lo, hi]] of Object.entries(lim)) {
+    const input = document.getElementById("p-" + path), note = document.querySelector(`[data-range="${path}"]`);
+    if (!input) continue;
+    input.min = lo; input.max = hi;
+    input.classList.toggle("bad", input.value === "" || +input.value < lo || +input.value > hi);
+    note.textContent = Math.abs(lo) >= 360 ? "any" : `${lo} to ${hi}`;
+  }
 }
 function params() {
   const props = {};
@@ -221,7 +238,16 @@ function params() {
 }
 function reset() {
   if (!api) return;
-  world = JSON.parse(api.start(JSON.stringify(params())));
+  const res = JSON.parse(api.start(JSON.stringify(params())));
+  showLimits(res.limits);
+  $("problems").innerHTML = (res.error || []).map(e => `<li>${e}</li>`).join("");
+  if (res.error) {                       // invalid input: nothing was started, keep showing the last valid world
+    running = false; $("play").textContent = "Start";
+    const b = $("banner"); b.className = "banner warn";
+    b.textContent = "Not started: " + res.error.length + " property value" + (res.error.length > 1 ? "s are" : " is") + " not allowed. See the Properties tab.";
+    return;
+  }
+  world = res;
   trail = []; scan = []; cached = []; edges = [];
   take(JSON.parse(api.advance(0, "")));
   running = false; $("play").textContent = "Start";
@@ -294,6 +320,7 @@ $("brun").onclick = async () => {
     $("bprog").textContent = `Running trial ${k + 1} of ${n}...`;
     await new Promise(r => setTimeout(r, 10));
     const part = JSON.parse(api.batch(p, k, Math.min(2, n - k)));
+    if (part.error) { $("bprog").textContent = "Not run: " + part.error.join("; "); $("brun").disabled = false; return; }
     for (const [c, v] of Object.entries(part)) {
       tot[c] ??= {n: 0, success: 0, outcomes: {}};
       tot[c].n += v.n; tot[c].success += v.success;

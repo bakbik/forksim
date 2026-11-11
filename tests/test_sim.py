@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import forksim as fs
 from forksim.behaviors import acceptable_angle
@@ -108,9 +109,25 @@ def test_collision_check_stops_a_truck_driven_into_the_pallet_side():
     assert run.outcome == "collision_side" and run.alert.startswith("COLLISION")
 
 
-def test_too_heavy_pallet_is_not_a_success():
-    cfg = fs.override(fs.ideal(), {"pallet.weight_kg": 2000.0})
-    assert fs.run_trial(cfg, "actuator_aware", 0).outcome == "overload"
+def test_defaults_are_valid_and_out_of_range_input_is_refused():
+    assert fs.validate(fs.nominal()) == [] and fs.validate(fs.ideal()) == []
+    for path, value in (("pallet.width", 0.6),          # forks cannot fit between the outer blocks
+                        ("pallet.weight_kg", 2000.0),   # over the truck's rated load
+                        ("pallet.x", 25.0),             # outside the room
+                        ("task.approach_distance", 0.0)):
+        cfg = fs.override(fs.nominal(), {path: value})
+        assert any(path in msg for msg in fs.validate(cfg)), path
+        with pytest.raises(ValueError):
+            TrialRunner(cfg)
+
+
+def test_limits_follow_from_the_truck():
+    lim = fs.limits(fs.nominal())
+    assert lim["pallet.width"][0] == pytest.approx(0.77)        # 550 mm forks + two 100 mm blocks + clearance
+    assert lim["pallet.weight_kg"][1] == 1500.0
+    wider_forks = fs.override(fs.nominal(), {"forklift.fork_outer_width": 0.68})
+    assert fs.limits(wider_forks)["pallet.width"][0] == pytest.approx(0.90)
+    assert fs.validate(wider_forks) != []                       # a EUR pallet no longer fits those forks
 
 
 def test_web_page_loads_every_module_the_package_needs():
