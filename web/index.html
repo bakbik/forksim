@@ -69,6 +69,13 @@ th { color: var(--muted); font-size: 12px; }
 .row input.bad { border-color: var(--bad); }
 .problems { color: var(--bad); font-size: 12.5px; margin: 6px 0; padding-left: 18px; }
 .problems:empty { display: none; }
+#bout table { margin-bottom: 4px; }
+#bout td.n { padding-left: 8px; }
+#bplot { width: 100%; height: auto; display: block; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { font-family: var(--mono); font-size: 12px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 99px; background: var(--bg); cursor: pointer; }
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.key { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: baseline; }
 .check { display: flex; gap: 7px; align-items: center; margin: 4px 0; }
 .check input { accent-color: var(--accent); }
 kbd { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--bg); }
@@ -166,7 +173,7 @@ kbd { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--line)
     </div>
 
     <div class="pane" id="tab-batch">
-      <p class="hint">Runs many trials with the current properties and error levels, for both drivers. Same trial numbers for both, so they face the same situations.</p>
+      <p class="hint">Runs many trials with the current properties and error levels, for both drivers, then evaluates them: success, which layer accepted, how failures ended, and the alignment errors. Same trial numbers for both, so they face the same situations.</p>
       <div class="row"><label for="bn">Trials</label><select id="bn"><option>10</option><option selected>20</option><option>40</option></select></div>
       <div class="btns"><button class="btn primary" id="brun">Run batch</button></div>
       <p class="hint" id="bprog"></p>
@@ -184,7 +191,7 @@ const FILES = ["__init__.py", "config.py", "geometry.py", "vehicle.py", "sensors
 const $ = id => document.getElementById(id);
 const cv = $("cv"), ctx = cv.getContext("2d");
 let api = null, world = null, st = null, running = false, trail = [], defaults = {}, keys = {};
-let scan = [], cached = [], edges = [];
+let scan = [], cached = [], edges = [], tolMm = 30;
 
 async function boot() {
   try {
@@ -254,6 +261,7 @@ function reset() {
   $("manualhint").hidden = $("controller").value !== "manual";
   const t = world.truck, b = world.pallet.blocks;
   const tol = Math.min(b[2][0] - (t.fork_spacing / 2 + t.fork_width / 2), (t.fork_spacing / 2 - t.fork_width / 2) - b[1][1]) * 1000;
+  tolMm = tol + 5;      // plus the 5 mm of contact the collision check tolerates
   $("o-tol").textContent = `Forks have ${tol.toFixed(0)} mm of room each side inside a pocket.`;
   const pc = world.pallet.centre;
   $("o-pallet").textContent = `${pc[0].toFixed(2)}, ${pc[1].toFixed(2)} m, ${pc[2].toFixed(1)} deg`;
@@ -312,28 +320,118 @@ function manualAction() {
 }
 
 // ---------------------------------------------------------------- batch
+const DRIVER = {baseline: "Baseline", actuator_aware: "Actuator-aware"};
+const DRIVER_COLOR = {baseline: "--bad", actuator_aware: "--lidar"};
+const DETECT_FLAGS = ["no_pallet_detected", "no_approach_position"];
+function pct(values, q) {            // q-th percentile of |values|, ignoring missing ones
+  const v = values.filter(x => x !== null).map(Math.abs).sort((x, y) => x - y);
+  return v.length ? v[Math.floor(q * (v.length - 1))] : null;
+}
+function wilson(k, n) {              // 95 % confidence interval for a rate
+  if (!n) return [0, 1];
+  const z = 1.96, ph = k / n, c = (ph + z * z / (2 * n)) / (1 + z * z / n);
+  const h = z * Math.sqrt(ph * (1 - ph) / n + z * z / (4 * n * n)) / (1 + z * z / n);
+  return [Math.max(0, c - h), Math.min(1, c + h)];
+}
+const pair = (rows, key, d) => { const a = pct(rows.map(r => r[key]), 0.5), b = pct(rows.map(r => r[key]), 0.9); return a === null ? "-" : `${a.toFixed(d)} / ${b.toFixed(d)}`; };
+
+function renderBatch(all) {
+  const drivers = Object.keys(all), n = all[drivers[0]].length;
+  const cols = drivers.map(d => `<th class="n">${DRIVER[d]}</th>`).join("");
+  const row = (label, f) => `<tr><td>${label}</td>${drivers.map(d => `<td class="n">${f(all[d], d)}</td>`).join("")}</tr>`;
+  const passedDetect = r => !DETECT_FLAGS.includes(r.outcome) && !(r.outcome === "timeout" && r.phase === "detect");
+  const passedApproach = r => r.hand_lat !== null && r.outcome !== "approach_error_too_large";
+  let h = `<h2>Result</h2><table><tr><th></th>${cols}</tr>`;
+  h += row("Pallets loaded", rows => `${rows.filter(r => r.ok).length} / ${n}`);
+  h += row("Rate, 95 % interval", rows => { const [lo, hi] = wilson(rows.filter(r => r.ok).length, n); return `${(100 * lo).toFixed(0)}-${(100 * hi).toFixed(0)} %`; });
+  h += row("Mean time", rows => (rows.reduce((t, r) => t + r.t, 0) / n).toFixed(0) + " s");
+  h += `</table><h2>Layer by layer</h2><table><tr><th>Accepted by</th>${cols}</tr>`;
+  h += row("Detect", rows => `${rows.filter(passedDetect).length} / ${n}`);
+  h += row("Approach", rows => `${rows.filter(passedApproach).length} / ${n}`);
+  h += row("Align (loaded)", rows => `${rows.filter(r => r.ok).length} / ${n}`);
+  const outcomes = [...new Set(drivers.flatMap(d => all[d].map(r => r.outcome)))].filter(o => o !== "success");
+  h += `</table><h2>How the failures ended</h2>`;
+  if (outcomes.length) {
+    h += `<table><tr><th></th>${cols}</tr>`;
+    for (const o of outcomes) h += row(o.replaceAll("_", " "), rows => rows.filter(r => r.outcome === o).length || "");
+    h += "</table>";
+  } else h += `<p class="hint">No failures.</p>`;
+  h += `<h2>Alignment errors, ground truth</h2><table><tr><th>median / 90th pct</th>${cols}</tr>`;
+  h += row("At approach target, lateral (mm)", rows => pair(rows, "hand_lat", 0));
+  h += row("At approach target, angle (deg)", rows => pair(rows, "hand_ang", 2));
+  h += row("At fork entry, lateral (mm)", rows => pair(rows, "entry_lat", 1));
+  h += row("At fork entry, angle (deg)", rows => pair(rows, "entry_ang", 2));
+  h += `</table><p class="hint">Forks must cross the entry edge within +/-${tolMm.toFixed(0)} mm.</p>`;
+  h += `<h2>What the robot believed</h2><table><tr><th>median / 90th pct</th>${cols}</tr>`;
+  h += row("Its own lateral estimate at the approach target (mm)", rows => pair(rows, "est_lat", 0));
+  h += row("Last pallet detection, position error (mm)", rows => pair(rows, "det_pos", 0));
+  h += row("Last pallet detection, angle error (deg)", rows => pair(rows, "det_ang", 2));
+  h += `</table><h2>At fork entry</h2><canvas id="bplot" width="640" height="400" aria-label="Lateral offset against angle as the fork tips cross the entry edge, one dot per trial"></canvas>`;
+  h += `<p class="hint">${drivers.map(d => `<span class="key" style="background: var(${DRIVER_COLOR[d]})"></span>${DRIVER[d]}`).join(" &nbsp; ")} &nbsp; filled = loaded, ring = failed. Dashed lines: fork clearance.</p>`;
+  if (drivers.length === 2) {
+    const [a, b] = drivers, ok = (d, i) => all[d][i].ok;
+    const count = f => all[a].filter((_, i) => f(i)).length;
+    h += `<h2>Same situations, both drivers</h2><table>`;
+    h += `<tr><td>Both loaded</td><td class="n">${count(i => ok(a, i) && ok(b, i))}</td></tr>`;
+    h += `<tr><td>Only ${DRIVER[a]}</td><td class="n">${count(i => ok(a, i) && !ok(b, i))}</td></tr>`;
+    h += `<tr><td>Only ${DRIVER[b]}</td><td class="n">${count(i => !ok(a, i) && ok(b, i))}</td></tr>`;
+    h += `<tr><td>Neither</td><td class="n">${count(i => !ok(a, i) && !ok(b, i))}</td></tr></table>`;
+  }
+  const failed = drivers.flatMap(d => all[d].filter(r => !r.ok).map(r => [d, r]));
+  if (failed.length) {
+    h += `<h2>Replay a failure</h2><div class="chips">` + failed.slice(0, 40).map(([d, r]) =>
+      `<button class="chip" data-driver="${d}" data-trial="${r.trial}" title="${r.outcome.replaceAll("_", " ")}">${DRIVER[d]} #${r.trial}</button>`).join("") + "</div>";
+  }
+  $("bout").innerHTML = h;
+  document.querySelectorAll("#bout .chip").forEach(c => c.onclick = () => {
+    $("controller").value = c.dataset.driver; $("trial").value = c.dataset.trial;
+    document.querySelector('.tabs button[data-tab="run"]').click();
+    reset(); running = true; $("play").textContent = "Pause";
+  });
+  drawBatchPlot(all);
+}
+
+function drawBatchPlot(all) {
+  const c = $("bplot"), g = c.getContext("2d"), W = c.width, H = c.height, m = {l: 62, r: 14, t: 14, b: 44};
+  const pts = Object.entries(all).flatMap(([d, rows]) => rows.filter(r => r.entry_lat !== null).map(r => [d, r]));
+  const ymax = Math.max(1.6 * tolMm, ...pts.map(([, r]) => Math.abs(r.entry_lat))) * 1.08;
+  const xmax = Math.max(1, ...pts.map(([, r]) => Math.abs(r.entry_ang))) * 1.08;
+  const X = v => m.l + (v + xmax) / (2 * xmax) * (W - m.l - m.r), Y = v => m.t + (ymax - v) / (2 * ymax) * (H - m.t - m.b);
+  g.clearRect(0, 0, W, H);
+  g.font = "20px system-ui, sans-serif"; g.fillStyle = g.strokeStyle = css("--muted"); g.lineWidth = 1;
+  g.strokeRect(m.l, m.t, W - m.l - m.r, H - m.t - m.b);
+  g.beginPath(); g.moveTo(X(0), m.t); g.lineTo(X(0), H - m.b); g.moveTo(m.l, Y(0)); g.lineTo(W - m.r, Y(0)); g.globalAlpha = 0.35; g.stroke(); g.globalAlpha = 1;
+  g.setLineDash([8, 6]); g.strokeStyle = css("--ink"); g.beginPath();
+  for (const t of [tolMm, -tolMm]) { g.moveTo(m.l, Y(t)); g.lineTo(W - m.r, Y(t)); }
+  g.stroke(); g.setLineDash([]);
+  g.textAlign = "right"; g.textBaseline = "middle";
+  for (const t of [tolMm, 0, -tolMm]) g.fillText(t.toFixed(0), m.l - 8, Y(t));
+  g.textAlign = "center"; g.textBaseline = "top";
+  for (const t of [-xmax / 1.08, 0, xmax / 1.08]) g.fillText(t.toFixed(1), X(t), H - m.b + 6);
+  g.fillText("angle (deg)", (m.l + W - m.r) / 2, H - 22);
+  g.save(); g.translate(16, (m.t + H - m.b) / 2); g.rotate(-Math.PI / 2); g.textBaseline = "middle"; g.fillText("lateral (mm)", 0, 0); g.restore();
+  g.lineWidth = 2.5;
+  for (const [d, r] of pts) {
+    g.fillStyle = g.strokeStyle = css(DRIVER_COLOR[d]);
+    g.beginPath(); g.arc(X(r.entry_ang), Y(r.entry_lat), 6, 0, 7);
+    r.ok ? g.fill() : g.stroke();
+  }
+  if (!pts.length) { g.fillStyle = css("--muted"); g.textBaseline = "middle"; g.fillText("no trial got its forks to the entry edge", W / 2, H / 2); }
+}
+
 $("brun").onclick = async () => {
   if (!api) return;
-  const n = +$("bn").value, p = JSON.stringify(params()), tot = {};
+  const n = +$("bn").value, p = JSON.stringify(params()), all = {};
   $("brun").disabled = true; running = false; $("play").textContent = "Start";
   for (let k = 0; k < n; k += 2) {
     $("bprog").textContent = `Running trial ${k + 1} of ${n}...`;
     await new Promise(r => setTimeout(r, 10));
     const part = JSON.parse(api.batch(p, k, Math.min(2, n - k)));
     if (part.error) { $("bprog").textContent = "Not run: " + part.error.join("; "); $("brun").disabled = false; return; }
-    for (const [c, v] of Object.entries(part)) {
-      tot[c] ??= {n: 0, success: 0, outcomes: {}};
-      tot[c].n += v.n; tot[c].success += v.success;
-      for (const [o, m] of Object.entries(v.outcomes)) tot[c].outcomes[o] = (tot[c].outcomes[o] || 0) + m;
-    }
-    let h = "<table><tr><th>Driver</th><th class='n'>Loaded</th></tr>";
-    for (const [c, v] of Object.entries(tot)) {
-      const fails = Object.entries(v.outcomes).filter(([o]) => o !== "success").sort((a, b) => b[1] - a[1]).map(([o, m]) => `${o.replaceAll("_", " ")} ${m}`).join(", ");
-      h += `<tr><td>${c.replace("_", "-")}<div class="hint">${fails || "no failures"}</div></td><td class="n">${v.success} / ${v.n}</td></tr>`;
-    }
-    $("bout").innerHTML = h + "</table>";
+    for (const [c, rows] of Object.entries(part)) (all[c] ??= []).push(...rows);
+    renderBatch(all);
   }
-  $("bprog").textContent = `Done: ${n} trials per driver.`;
+  $("bprog").textContent = `Done: ${n} trials per driver, same trial numbers for both.`;
   $("brun").disabled = false;
 };
 

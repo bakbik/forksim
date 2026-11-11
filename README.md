@@ -47,7 +47,7 @@ Open **<https://bakbik.github.io/forksim/>**. The page downloads Python
 | **Run** | Pick a driver, press **Start**. *Trial number* selects the situation: the same number always gives the same pallet pose, start pose and hidden errors. *Next trial* moves to a new one. Speed up to 15x. |
 | **Properties** | Room size; pallet position, angle, size and weight; truck start pose, max speed, max steer angle, minimum turning radius; approach distance **D**. The allowed range is shown under each field; a value outside it is refused with a reason. *Apply and restart* to use them. |
 | **Errors** | Two sliders: how wrong perception is and how badly the truck obeys, from 0 (ideal simulator) through 1 (assumed real truck) to 3. |
-| **Batch** | Runs 10 to 40 trials for both drivers with the current settings and tabulates how each ended. |
+| **Batch** | Runs 10 to 40 trials for both drivers with the current settings, then shows the evaluation: pallets loaded with a confidence interval, how many each layer accepted, how the failures ended, alignment errors at the approach target and at fork entry, a scatter against the fork clearance, the paired comparison, and a button per failed trial to replay it. |
 
 Drivers:
 

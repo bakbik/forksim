@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import math
-from collections import Counter
 from dataclasses import replace
 
 import numpy as np
@@ -139,7 +138,8 @@ def advance(n: int, action_json: str = "") -> str:
 
 
 def batch(params_json: str, first: int, count: int) -> str:
-    """Run `count` trials starting at index `first` for every controller; returns outcomes."""
+    """Run `count` trials starting at index `first` for every controller.
+    Returns one compact row per trial so the page can build the evaluation itself."""
     p = json.loads(params_json)
     cfg = _config(p)
     problems = validate(cfg)
@@ -147,7 +147,13 @@ def batch(params_json: str, first: int, count: int) -> str:
         return json.dumps(dict(error=problems))
     out = {}
     for ctrl in CONTROLLERS:
-        res = [run_trial(cfg, ctrl, k, int(p.get("seed", 0))) for k in range(first, first + count)]
-        out[ctrl] = dict(n=len(res), success=sum(r.success for r in res),
-                         outcomes=dict(Counter(r.outcome for r in res)))
+        rows = []
+        for k in range(first, first + count):
+            r = run_trial(cfg, ctrl, k, int(p.get("seed", 0)))
+            rows.append(dict(trial=k, ok=r.success, outcome=r.outcome, phase=r.phase, t=_r(r.duration_s, 1),
+                             hand_lat=_r(r.handover_lat_mm, 1), hand_ang=_r(r.handover_angle_deg, 2),
+                             est_lat=_r(r.est_lat_mm, 1), est_ang=_r(r.est_angle_deg, 2),
+                             entry_lat=_r(r.entry_lat_mm, 1), entry_ang=_r(r.entry_angle_deg, 2),
+                             det_pos=_r(r.det_pos_mm, 1), det_ang=_r(r.det_angle_deg, 2)))
+        out[ctrl] = rows
     return json.dumps(out)
