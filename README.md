@@ -8,14 +8,15 @@ lidar, drives to it and loads it. It was built to answer one question:
 > The ideal simulator says the pickup always works. Which departures from ideal
 > break it first, perception or control, and how much of each can it take?
 
-**Short answer, from 16,200 simulated pickups:** perception breaks it first, and
-one error in particular: the lidar not pointing quite where the software thinks
-it does. The ideal simulator loads the pallet 500 times out of 500 and cannot
-see this at all. With the error levels I assumed for a real truck it loads 93 %;
-at one and a half times those levels, 70 %. Control errors only start to matter
-beyond that. The controller improvement I built made the truck arrive much
-straighter and changed the success rate by nothing at realistic error levels,
-because straightness was not what was failing. [Details below.](#results)
+**Short answer, from 2,610 simulated pickups:** the ideal simulator loads the
+pallet every time and cannot tell a naive controller from a careful one. With
+the error levels I assumed for a real truck both still load about 93 %. Push
+the errors to one and a half times that and they split: the naive controller
+drops to 38 %, the careful one holds 70 %. What breaks the naive one is the
+steering actuator being slow. What limits the careful one is the lidar: where
+it is mounted, and how noisy it is at range. Lag between perception and control
+does nothing up to about 0.3 s and is then a cliff, unless the controller
+compensates for it. [Details below.](#results)
 
 The same Python package runs the browser demo, the batch experiments and the
 tests. There is one implementation, not a demo and a "real" one.
@@ -86,9 +87,9 @@ Then open <http://localhost:8765/web/>.
 python -m forksim.experiment
 ```
 
-Runs every experiment described below (16,200 trials, about 20 minutes on 15
-worker processes), writes `results/` and draws the figures. `--quick` runs a
-tenth of it, `--seed N` a different but equally reproducible set.
+Runs every experiment described below (2,610 trials, about 7 minutes on 15
+worker processes), writes `results/` and draws the figures. `--seed N` gives a
+different but equally reproducible set.
 
 ```bash
 python -m pytest -q
@@ -257,13 +258,14 @@ both controllers and at every error level, so comparisons are paired.
 
 ## Sources of error
 
-Twelve independent parameters, all in `config.py`. `0x` of everything is the
+Eleven independent parameters, all in `config.py`. `0x` of everything is the
 ideal simulator; `1x` is a guess at an uncalibrated real truck. **The 1x values
 are assumptions, not measurements.**
 
 | Perception | 1x value | What it is |
 |---|---|---|
-| Lidar range noise | 15 mm | White noise on every beam |
+| Lidar noise at the sensor | 6 mm | Range noise on a beam at zero range |
+| Lidar noise growth with range | 3 mm per m | Added per metre of range. Also stands in for the beam spot widening and blurring edges. Together: 9 mm at 1 m, 15 mm at 3 m, 30 mm at 8 m |
 | Lidar dropout | 2 % | Beams that return nothing |
 | Lidar mount yaw error | 0.5 deg | Scanner not pointing where perception thinks; fixed per trial |
 | Lidar mount lateral error | 5 mm | Scanner not sitting where perception thinks; fixed per trial |
@@ -273,15 +275,19 @@ are assumptions, not measurements.**
 |---|---|---|
 | Steering zero offset | 1 deg | Wheel is not where its encoder says; fixed per trial |
 | Steering lag | 0.25 s | First-order response of the steering actuator |
-| Steering rate limit | 40 deg/s | Infinite in the ideal simulator |
+| Steering rate limit | 40 deg/s | Scales inversely: 27 deg/s at 1.5x, 20 deg/s at 2x, none in the ideal simulator |
 | Command latency | 0.10 s | Pure delay between command and actuator |
 | Drive lag | 0.40 s | First-order response of the drive |
-| Wheel scale error | 1 % | True speed differs from encoder speed; fixed per trial |
-| Floor slip | 0.2 deg/√m | Heading random walk the encoders do not see |
 
-Truth and odometry are integrated side by side. The zero offset, wheel scale
-and slip move the truck without moving its odometry, which is what "it does not
-drive exactly where it is told" means here.
+Truth and odometry are integrated side by side. The steering zero offset turns
+the truck without turning its odometry, which is what "it does not drive exactly
+where it is told" means here. Wheel slip and wheel-radius error are neglected.
+
+Because lidar noise grows with range, **a closer look is a better look**, and
+the pipeline is built to count on that. The detector holds nearby points to a
+tight line and far ones to a loose line, and the tracked pallet pose weights
+each detection by the range it was made from, so the estimate sharpens as the
+truck closes in.
 
 ## Architecture
 
@@ -327,40 +333,41 @@ graphics, 3D, or contact physics.
 
 ## The experiment
 
-Error sources are grouped as *perception* and *control* and scaled together.
-Three experiments, all paired by trial number:
+Error sources are grouped as *perception* and *control* and scaled together:
+0x is the ideal simulator, 1x my guess at a real truck, 1.5x "stressed". All
+experiments are paired by trial number, so both controllers face identical
+situations.
 
-1. **Grid.** Both groups swept from 0x to 2x in five steps, 120 trials per cell
-   per controller. Shows where success collapses and along which axis.
-2. **Sensitivity.** With everything held at 1.5x, one source at a time is
-   removed or doubled, 150 trials each. It is done at 1.5x rather than 1x
-   because that is where pickups start to fail; at 1x there is little to
-   explain.
-3. **Detection alone.** 300 single scans per range and noise level, from
-   anywhere within 80 deg of the pallet axis, with no truck motion. Isolates the
-   lidar pipeline.
+| Experiment | What is swept | Trials per cell |
+|---|---|---|
+| Headline | Everything at 0x, 1x, 1.5x | 80 |
+| Grid | Perception multiplier {0, 1, 1.5, 2} against control multiplier {0, 1, 1.5, 2} | 20 |
+| Sensitivity | Everything at 1.5x, then one source at a time removed or doubled | 15 |
+| Lag | Stale scan + command delay from 0 to 640 ms, the rest at 1x | 20 |
+| Approach distance | D = 0.3, 0.5, 1, 1.5, 2, 3 m at 1x and 1.5x | 15 |
+| Start layout | Truck starts facing an entry edge, a corner, or a side edge; at 0x, 1x, 1.5x | 15 |
+| Detection alone | Single scans from 1 to 8 m, no truck, noise at 1x and 2x | 100 scans |
 
-Plus 500 trials per controller at 0x, 1x and 1.5x for the headline numbers and
-the failure breakdown.
+2,610 trials, about 7 minutes on 15 worker processes.
+
+**The cells are small.** With 15 to 20 trials a rate is only good to about
++/-20 points, so only large differences below mean anything. The headline rows
+(80 trials) are good to about +/-10.
 
 ## Results
 
-16,200 trials, seed 0. Everything here is regenerated by
-`python -m forksim.experiment`. Full tables are in
+Seed 0. Regenerate with `python -m forksim.experiment`. Full tables in
 [`results/summary.md`](results/summary.md), one row per trial in
-`results/trials.csv`.
-
-**All of it is conditional on the assumed 1x error levels.** Read the shapes,
-not the percentages.
+`results/trials.csv`. Everything is conditional on the assumed 1x error levels.
 
 | Simulator | Controller | Loaded | 95 % CI | Lateral / angle at fork entry (p90) | Mean time |
 |---|---|---|---|---|---|
-| Ideal (0x) | Baseline | 500 / 500 | 99.2 - 100 % | 0.2 mm / 0.03 deg | 26 s |
-| Ideal (0x) | Actuator-aware | 500 / 500 | 99.2 - 100 % | 0.3 mm / 0.05 deg | 29 s |
-| Assumed real truck (1x) | Baseline | 464 / 500 | 90.2 - 94.8 % | 23.0 mm / 2.33 deg | 29 s |
-| Assumed real truck (1x) | Actuator-aware | 463 / 500 | 90.0 - 94.6 % | 23.9 mm / 0.21 deg | 38 s |
-| Stressed (1.5x) | Baseline | 343 / 500 | 64.4 - 72.5 % | 32.6 mm / 6.65 deg | 36 s |
-| Stressed (1.5x) | Actuator-aware | 360 / 500 | 67.9 - 75.8 % | 35.6 mm / 0.36 deg | 49 s |
+| Ideal (0x) | Baseline | 80 / 80 | 95 - 100 % | 0.2 mm / 0.03 deg | 25 s |
+| Ideal (0x) | Actuator-aware | 80 / 80 | 95 - 100 % | 0.3 mm / 0.04 deg | 29 s |
+| Assumed real truck (1x) | Baseline | 75 / 80 | 86 - 97 % | 22.6 mm / 2.15 deg | 29 s |
+| Assumed real truck (1x) | Actuator-aware | 73 / 80 | 83 - 96 % | 24.2 mm / 0.19 deg | 39 s |
+| Stressed (1.5x) | Baseline | 30 / 80 | 28 - 49 % | 33.1 mm / 12.6 deg | 46 s |
+| Stressed (1.5x) | Actuator-aware | 56 / 80 | 59 - 79 % | 36.2 mm / 0.28 deg | 61 s |
 
 The forks have 30 mm of room each side (25 mm clearance plus the 5 mm contact
 tolerance).
@@ -369,106 +376,144 @@ tolerance).
 
 ### 1. The ideal simulator says 100 % and cannot tell the controllers apart
 
-500 of 500 for both. A team choosing between these two controllers in an ideal
-simulator has no information to choose with, and no warning of anything below.
+80 of 80 for both, in every start layout. It gives no warning of anything below.
 
-### 2. Perception breaks first
+### 2. At the assumed error levels the two controllers are still equal
 
-Reading the grid along each axis with the other held ideal (baseline):
+94 % and 91 %. The improvement arrives far straighter (0.19 deg against 2.15 deg
+at fork entry) but both end up with the same 23 mm lateral error at the forks,
+and lateral error is what decides a pickup. It costs 10 seconds.
 
-| Error level | 0x | 0.5x | 1x | 1.5x | 2x |
-|---|---|---|---|---|---|
-| Perception error only | 100 % | 100 % | 95 % | 78 % | 63 % |
-| Control error only | 100 % | 100 % | 100 % | 99 % | 92 % |
+### 3. Past that, they split, and for different reasons
 
-Perception costs pickups from 1x onward. Control costs almost nothing until 2x.
+Reading the grid along each axis with the other held ideal:
 
-### 3. One error source dominates: where the lidar points
+| | 0x | 1x | 1.5x | 2x |
+|---|---|---|---|---|
+| Control error only, baseline | 100 % | 100 % | 50 % | 25 % |
+| Control error only, actuator-aware | 100 % | 100 % | 100 % | 100 % |
+| Perception error only, baseline | 100 % | 95 % | 75 % | 60 % |
+| Perception error only, actuator-aware | 100 % | 95 % | 75 % | 55 % |
+
+The baseline is broken by **control** error. The actuator-aware controller is
+immune to control error across the whole range tested and is limited only by
+**perception**, exactly as much as the baseline is.
+
+### 4. Which error sources carry it
 
 ![One error source changed at a time](results/fig2_sensitivity.png)
 
-With everything at 1.5x, removing the **lidar mount yaw error** alone takes
-both controllers from about 70 % to **98 %**. Doubling it takes them to 43 % and
-46 %. No other source comes close in both directions.
+Everything at 1.5x, one source changed. Cells of 15, so only the big moves count:
 
-The reason is geometry. A scanner that points 0.5 deg off places a pallet 2 m
-away 17 mm to the side. The error is the same in every scan, so looking again
-does not average it out, and the forks only have 30 mm. Every failure at 1x is a
-fork hitting a block.
-
-![The two alignment errors as the forks reach the pallet](results/fig3_alignment.png)
-
-Success is decided by the lateral offset. The angle is not a hard limit for
-this truck: it keeps steering as it drives in and it pivots near its fork tips,
-so the baseline still loads pallets it reached 4 deg crooked.
-
-### 4. Lidar range noise is a cliff, not a slope
-
-Removing range noise entirely gains 3 to 4 points. Doubling it (to 45 mm) drops
-both controllers to **3 %**, almost all of them timeouts: the detector can no
-longer hold a confirmed pallet. That is a limit of my detector, which accepts
-points within 40 mm of a line, not a fact about lidars. It is still the kind of
-thing a simulator should surface: a parameter that looks harmless until it
-suddenly is not.
-
-### 5. The improvement did not improve the success rate at realistic levels
-
-92.8 % against 92.6 % at 1x. The trials are paired, so this can be said more
-sharply: of 500 identical situations, both controllers loaded 461, both failed
-34, and only 5 differed (2 one way, 3 the other).
-
-The improvement does what it was built to do. It arrives straighter: 0.21 deg
-against 2.33 deg at fork entry, and 60 mm against 146 mm of lateral error at the
-approach target. That was simply not what was failing. Both controllers end up
-with the same 23 mm lateral error at the forks, because that number is set by
-the lidar's mounting error, which neither controller can see. It also costs
-time: 38 s against 29 s.
-
-### 6. It pays off only when control is worse than I assumed
-
-| Condition | Baseline | Actuator-aware |
+| Change | Baseline (38 %) | Actuator-aware (70 %) |
 |---|---|---|
-| Control error 2x, all perception levels pooled | 57.2 % (343 / 600) | 74.2 % (445 / 600) |
-| Everything 1.5x, steering rate limit halved | 26.0 % | 70.0 % |
-| Everything 1.5x, steering lag doubled | 31.3 % | 70.0 % |
-| Everything 1.5x, drive lag doubled | 26.7 % | 70.7 % |
-| Everything 1.5x, command latency doubled | 43.3 % | 72.7 % |
-| Everything 1.5x | 68.6 % | 72.0 % |
+| Steering rate limit removed | **93 %** | 87 % |
+| Lidar mount yaw error removed | 60 % | **100 %** |
+| Lidar mount yaw error doubled | 20 % | 27 % |
+| Either lidar noise term doubled | **0 %** | **0 %** |
+| Steering lag doubled | 7 % | 80 % |
+| Command latency doubled | 13 % | 87 % |
 
-In the last row, 34 situations were loaded only by the actuator-aware
-controller and 17 only by the baseline. So the improvement is best described as
-insurance: it buys nothing at the assumed error levels and a great deal if the
-real actuators turn out slower than assumed.
+- **The baseline's problem is the steering rate limit.** A wheel that slews at
+  27 deg/s cannot follow commands tuned for an instant one. Remove that single
+  limit and the baseline recovers to 93 %.
+- **The actuator-aware controller's problem is where the lidar points.** Remove
+  the mounting yaw error and it loads every pallet. A scanner 0.5 deg off places
+  a pallet 2 m away 17 mm to the side, identically in every scan, so looking
+  again does not help.
+- **Lidar noise is a cliff.** Doubling either noise term from the 1.5x level
+  takes both controllers to zero: the truck cannot confirm or hold a pallet at
+  all (`no_pallet_detected`, timeouts). The detector is tuned to the data-sheet
+  noise; at three times that it stops working rather than degrading.
 
-### 7. Errors interact: removing one made things worse
+### 5. Lag between perception and control: nothing, then a cliff
 
-Removing the drive lag, with everything else at 1.5x, **lowered** the baseline
-from 68.6 % to 54.0 %. A sluggish drive was hiding the baseline's habit of
-moving off before the steered wheel had arrived; a crisp drive exposed it. The
-actuator-aware controller was unaffected (72.0 %). Fixing one actuator on a real
-truck could do the same.
+![Lag swept alone](results/fig8_lag.png)
 
-### 8. No single scan is good enough
+| Stale scan + command delay | Baseline | Actuator-aware |
+|---|---|---|
+| 0 ms | 95 % | 95 % |
+| 160 ms (assumed) | 95 % | 95 % |
+| 320 ms | 95 % | 95 % |
+| 480 ms | 55 % | 95 % |
+| 640 ms | 15 % | 95 % |
+
+I expected lag to be the main issue. At the lag I assumed it is not an issue at
+all: removing it entirely changes nothing. But it is not a slope either. Between
+320 and 480 ms the uncompensated controller falls off a cliff, and a controller
+that predicts across the delay is untouched to at least 640 ms. So the real
+question about lag is which side of the cliff a truck is on, and that can only
+be answered by measuring it.
+
+### 6. Approach distance D has a sweet spot
+
+![Approach distance sweep](results/fig6_approach_distance.png)
+
+| D | Baseline 1x | Actuator-aware 1x | Baseline 1.5x | Actuator-aware 1.5x |
+|---|---|---|---|---|
+| 0.3 m | 20 % | 60 % | 13 % | 7 % |
+| 0.5 m | 33 % | 100 % | 13 % | 47 % |
+| 1.0 m | 87 % | 100 % | 20 % | 80 % |
+| 1.5 m | 100 % | 100 % | 33 % | 80 % |
+| 2.0 m | 100 % | 100 % | 27 % | 33 % |
+| 3.0 m | 100 % | 100 % | 0 % | 0 % |
+
+- **Too short** and the accepted arrival angle shrinks until the approach is
+  rejected (`approach_error_too_large`): at D = 0.3 m and 1.5x, 13 of 15
+  approaches by the actuator-aware controller were turned away.
+- **Too long** fails differently, and only when errors are high: every failure
+  at D = 3 m is a timeout. Alignment starts 4 m from the pallet, where the lidar
+  is too noisy to track the entry edge steadily, and the truck spends its 90 s
+  waiting for detections.
+- So D is a trade between room to straighten up and how good the lidar is at
+  that distance. About 1 to 1.5 m here.
+
+### 7. Starting at the wrong edge
+
+![Start layouts](results/fig7_start_layout.png)
+
+| Facing at start | Baseline 1x | Actuator-aware 1x | Baseline 1.5x | Actuator-aware 1.5x |
+|---|---|---|---|---|
+| Entry edge | 100 % | 100 % | 33 % | 80 % |
+| Corner | 73 % | 100 % | 7 % | 60 % |
+| Side (wrong) edge | 73 % | 100 % | 0 % | 87 % |
+
+Starting in front of a side edge, the truck has to place the pallet from the
+wrong edge, work out where the entry edges are and drive round. At 1x the
+actuator-aware controller does it every time. The longer manoeuvre is where
+the baseline loses pickups even at 1x, the one place the two differ at the
+assumed error levels.
+
+### 8. A closer look is a better look
 
 ![Detection on its own](results/fig5_perception.png)
 
-With no truck in the loop, detection finds the pallet in at least 99.7 % of
-single scans at 1x noise and never mistakes a side edge for an entry edge
-(at 2x, in at most 1.3 %). But the lateral error of one scan is 22 to 36 mm at
-the 90th percentile, against a 30 mm clearance, and this is before any mounting
-error. The pickup works because estimates are averaged and retaken as the truck
-closes in, not because any one look is accurate. I did not investigate why the
-lateral error is larger at 2 m than at 7 m.
+Single scans, no truck, looking at an entry edge roughly head on, 1x noise:
+
+| Range | 8 m | 6 m | 4 m | 2 m | 1 m |
+|---|---|---|---|---|---|
+| Lateral error (p90) | 45 mm | 34 mm | 20 mm | 11 mm | 9 mm |
+| Angle error (p90) | 3.3 deg | 3.1 deg | 1.8 deg | 0.8 deg | 0.4 deg |
+
+At 8 m one scan is worse than the 30 mm fork clearance; at 1 m it is three times
+better than it. The pickup works because the truck keeps looking as it closes
+in and trusts the near looks most. The pallet is found in 95 % of scans or more
+at 1x, and mistaken for one turned 90 deg in at most 1 %.
 
 ![How trials end](results/fig4_outcomes.png)
 
+![The two alignment errors as the forks reach the pallet](results/fig3_alignment.png)
+
 ### So, when does the simulator lie?
 
-When it is ideal, it lies by omission. It reports 100 %, it ranks two
-controllers as equal, and it is blind to the single number that decides the
-outcome. Making it less ideal is not enough either: which imperfection is
-added matters far more than how many. Twelve were added here and one of them
-carries most of the result.
+When it is ideal, it lies by omission: 100 %, two controllers ranked equal,
+and no hint of any of the above. And the lie is not one of degree. Several of
+these effects are cliffs (lag past 0.3 s, lidar noise past the detector's
+tolerance, steering slower than the controller assumes), so a simulator that
+is "a bit optimistic" does not give a result that is a bit optimistic. It
+gives the right answer until the real number crosses a threshold, and then a
+completely wrong one. Which side of each threshold a real truck sits on is
+what has to be measured.
 
 ## Limitations
 
@@ -490,8 +535,13 @@ What the simulation does not capture, and what it should not be trusted for.
   no mixed pixels at block edges, no reflectivity effects, no motion distortion
   within a scan, no truck body blocking part of the 360 deg view. Range noise
   is white; real range errors are partly systematic per surface.
-- **Odometry is encoders only.** No gyro, no SLAM. The real truck's data sheet
-  claims +/-10 mm and +/-1 deg localisation; that is not modelled.
+- **Odometry is encoders only, and wheel slip and wheel-radius error are
+  neglected.** No gyro, no SLAM. The real truck's data sheet claims +/-10 mm and
+  +/-1 deg localisation; that is not modelled.
+- **Lidar noise is a single range-dependent term.** It stands in for range
+  noise and for the beam spot blurring edges. Surface reflectivity and angle of
+  incidence are not modelled.
+- **The experiment cells are small** (15 to 20 trials), one seed, one room.
 - **Some truck numbers are derived, not specified**: wheelbase, load-wheel
   position, steering lock and all actuator dynamics.
 - **The baseline is deliberately naive.** It shows what the ideal simulator
@@ -507,36 +557,33 @@ about contact forces, sign-off.
 
 ## What I would measure on a real forklift
 
-The simulator's answers depend on a handful of numbers that were assumed. I
-would measure those, then check one prediction end to end.
+Several results above are cliffs. The simulator is right on one side of each
+and badly wrong on the other, so the measurements that matter are the ones that
+say which side a real truck is on.
 
-1. **Lidar mounting error, yaw and lateral, per truck.** This is the number the
-   whole result hangs on: removing the yaw error took success from 70 % to 98 %.
-   It is multiplied by the range to the pallet, it is systematic, and
-   re-estimating cannot average it away. I assumed 0.5 deg; whether a real truck
-   is at 0.2 or 1.0 deg changes the verdict completely. Scan a surveyed flat
-   target from several known ranges and fit the offset. The yaw term matters far
-   more than the lateral term.
-2. **Steering and drive response: delay, lag, rate limit.** A step and a chirp
-   on each command with the wheel angle and speed logged. At my assumed values
-   these did not matter; with control errors at twice those values the baseline
-   loaded 60 % instead of 93 %. So the question for the real truck is only which side of that line
-   it is on, and it is cheap to find out. It also decides whether the
-   actuator-aware controller is worth its extra 9 seconds per pickup.
-3. **Detection error against ground truth, by range and viewing angle.** Place
-   a pallet at surveyed poses and log what `detect()` reports. This tests the
-   noise *model*, not only its size: white range noise was assumed, and if the
-   real error is correlated or biased the simulator is wrong in kind.
-4. **The two alignment errors at fork entry, over repeated real pickups.**
+1. **Lag between perception and control, end to end.** How old a scan is when
+   it is used, plus how long a command takes to reach the wheels. Flash a target
+   or bump the truck and time when the scan, the command and the wheel each
+   respond. Below about 0.3 s it did not matter here; above it an
+   uncompensated controller lost most of its pickups. The number also has to be
+   known for the controller to compensate at all.
+2. **Steering response: rate limit and lag.** A step on the steering command
+   with the wheel angle logged. The rate limit alone took the naive controller
+   from 93 % to 38 %. It is the cheapest measurement on this list.
+3. **Lidar mounting error, yaw especially, per truck.** With control handled
+   this is what is left: removing it took the better controller from 70 % to
+   100 %. It is systematic, so re-estimating cannot average it away. Scan a
+   surveyed flat target from several known ranges and fit the offset.
+4. **Lidar noise against range, on real pallets.** Log scans of a pallet at
+   surveyed distances and fit noise against range. The detector is tuned to an
+   assumed noise curve and stops working, rather than degrading, when the real
+   one is much worse. This also checks the noise *model*: I assumed one
+   range-dependent term, and real edges and dark wood may not behave that way.
+5. **The two alignment errors at fork entry, over 50 or more real pickups.**
    Lateral offset and angle between pallet edge and carriage face, measured
-   externally as the tips cross the edge, for 50 or more runs. This is the
-   end-to-end check: with 1 to 3 plugged in, the simulated distribution of these
-   two numbers should match the real one. If it does, the success rate becomes
-   believable. If it does not, the missing physics is in the limitations list.
-5. **How much misalignment a real pallet tolerates.** Push forks in at
-   deliberate lateral offsets and find where it stops working. The 25 mm + 5 mm
-   envelope used here is pure geometry; the real one is probably wider, and it
-   is the pass line everything else is judged against.
+   externally as the tips cross the edge. This is the end-to-end check: with 1
+   to 4 plugged in, the simulated distribution of these two numbers should match
+   the real one. If it does, the success rate becomes believable.
 
 ## Using it from Python
 
@@ -585,7 +632,7 @@ forksim/
   report.py       figures and results table
   webapi.py       bridge used by the web page
 web/index.html    the simulator in a browser
-tests/            14 checks, about 20 s
+tests/            14 checks, about 5 s
 ```
 
 Built with an AI coding assistant.

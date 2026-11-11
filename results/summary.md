@@ -1,4 +1,4 @@
-# Results (seed 0, 16200 trials)
+# Results (seed 0, 2610 trials)
 
 Lateral tolerance from fork/pocket geometry: +/-30.0 mm. Error columns are 90th percentiles of ground truth: lateral mm / angle deg.
 
@@ -6,58 +6,93 @@ Lateral tolerance from fork/pocket geometry: +/-30.0 mm. Error columns are 90th 
 
 | Simulator | Controller | Loaded | Rate (95 % CI) | Error at approach target | Error at fork entry | Mean time (s) | Failures |
 |---|---|---|---|---|---|---|---|
-| ideal sim | Baseline | 500/500 | 100.0 % (99.2-100.0) | 15.4 / 0.56 | 0.2 / 0.03 | 26 | - |
-| assumed real truck (1x) | Baseline | 464/500 | 92.8 % (90.2-94.8) | 145.8 / 0.85 | 23.0 / 2.33 | 29 | collision fork face 23, collision fork wall 13 |
-| stressed (1.5x) | Baseline | 343/500 | 68.6 % (64.4-72.5) | 229.8 / 1.32 | 32.6 / 6.65 | 36 | collision fork face 98, collision fork wall 51, lost pallet 7, approach error too large 1 |
-| ideal sim | Actuator-aware | 500/500 | 100.0 % (99.2-100.0) | 15.6 / 0.64 | 0.3 / 0.05 | 29 | - |
-| assumed real truck (1x) | Actuator-aware | 463/500 | 92.6 % (90.0-94.6) | 59.9 / 0.92 | 23.9 / 0.21 | 38 | collision fork face 23, collision fork wall 14 |
-| stressed (1.5x) | Actuator-aware | 360/500 | 72.0 % (67.9-75.8) | 93.4 / 1.31 | 35.6 / 0.36 | 49 | collision fork face 93, collision fork wall 40, lost pallet 6, timeout 1 |
+| ideal sim | Baseline | 80/80 | 100.0 % (95.4-100.0) | 15.1 / 0.51 | 0.2 / 0.03 | 25 | - |
+| assumed real truck (1x) | Baseline | 75/80 | 93.8 % (86.2-97.3) | 139.2 / 0.80 | 22.6 / 2.15 | 29 | collision fork face 5 |
+| stressed (1.5x) | Baseline | 30/80 | 37.5 % (27.7-48.5) | 549.9 / 1.45 | 33.1 / 12.60 | 46 | collision fork face 25, collision fork wall 9, approach error too large 8, timeout 7, lost pallet 1 |
+| ideal sim | Actuator-aware | 80/80 | 100.0 % (95.4-100.0) | 15.4 / 0.53 | 0.3 / 0.04 | 29 | - |
+| assumed real truck (1x) | Actuator-aware | 73/80 | 91.2 % (83.0-95.7) | 63.8 / 0.91 | 24.2 / 0.19 | 39 | collision fork face 5, collision fork wall 2 |
+| stressed (1.5x) | Actuator-aware | 56/80 | 70.0 % (59.2-78.9) | 102.7 / 1.32 | 36.2 / 0.28 | 61 | collision fork face 14, collision fork wall 8, timeout 2 |
 
 ## One error source at a time (rest at 1.5x nominal)
 
 | Error source | Level | Baseline | Actuator-aware |
 |---|---|---|---|
-| (none changed) | - | 68.6 % | 72.0 % |
-| lidar range noise | removed | 72.7 % | 75.3 % |
-| lidar range noise | doubled | 2.7 % | 3.3 % |
-| lidar dropout | removed | 68.7 % | 72.0 % |
-| lidar dropout | doubled | 66.0 % | 69.3 % |
-| lidar mount yaw error | removed | 98.0 % | 98.0 % |
-| lidar mount yaw error | doubled | 42.7 % | 46.0 % |
-| lidar mount lateral error | removed | 72.0 % | 74.0 % |
-| lidar mount lateral error | doubled | 66.0 % | 70.0 % |
-| scan/pose time offset | removed | 74.0 % | 72.7 % |
-| scan/pose time offset | doubled | 51.3 % | 72.7 % |
-| steering zero offset | removed | 74.0 % | 76.7 % |
-| steering zero offset | doubled | 61.3 % | 68.7 % |
-| steering lag | removed | 69.3 % | 74.0 % |
-| steering lag | doubled | 31.3 % | 70.0 % |
-| steering rate limit | removed | 74.0 % | 72.7 % |
-| steering rate limit | doubled | 26.0 % | 70.0 % |
-| command latency | removed | 74.0 % | 74.0 % |
-| command latency | doubled | 43.3 % | 72.7 % |
-| drive lag | removed | 54.0 % | 72.0 % |
-| drive lag | doubled | 26.7 % | 70.7 % |
-| wheel scale error | removed | 70.7 % | 72.0 % |
-| wheel scale error | doubled | 68.0 % | 74.0 % |
-| floor slip | removed | 72.7 % | 75.3 % |
-| floor slip | doubled | 63.3 % | 68.0 % |
+| (none changed) | - | 37.5 % | 70.0 % |
+| lidar noise at the sensor | removed | 46.7 % | 73.3 % |
+| lidar noise at the sensor | doubled | 0.0 % | 0.0 % |
+| lidar noise growth with range | removed | 33.3 % | 86.7 % |
+| lidar noise growth with range | doubled | 0.0 % | 0.0 % |
+| lidar dropout | removed | 26.7 % | 80.0 % |
+| lidar dropout | doubled | 33.3 % | 80.0 % |
+| lidar mount yaw error | removed | 60.0 % | 100.0 % |
+| lidar mount yaw error | doubled | 20.0 % | 26.7 % |
+| lidar mount lateral error | removed | 40.0 % | 73.3 % |
+| lidar mount lateral error | doubled | 26.7 % | 66.7 % |
+| scan/pose time offset | removed | 26.7 % | 66.7 % |
+| scan/pose time offset | doubled | 13.3 % | 80.0 % |
+| steering zero offset | removed | 33.3 % | 80.0 % |
+| steering zero offset | doubled | 26.7 % | 80.0 % |
+| steering lag | removed | 26.7 % | 60.0 % |
+| steering lag | doubled | 6.7 % | 80.0 % |
+| steering rate limit | removed | 93.3 % | 86.7 % |
+| steering rate limit | doubled | 13.3 % | 26.7 % |
+| command latency | removed | 46.7 % | 86.7 % |
+| command latency | doubled | 13.3 % | 86.7 % |
+| drive lag | removed | 40.0 % | 73.3 % |
+| drive lag | doubled | 13.3 % | 80.0 % |
+
+## Approach distance D
+
+| D (m) | Baseline 1x | Baseline 1.5x | Actuator-aware 1x | Actuator-aware 1.5x |
+|---|---|---|---|---|
+| 0.3 | 20.0 % (rejected 3/15) | 13.3 % (rejected 0/15) | 60.0 % (rejected 6/15) | 6.7 % (rejected 13/15) |
+| 0.5 | 33.3 % (rejected 9/15) | 13.3 % (rejected 1/15) | 100.0 % (rejected 0/15) | 46.7 % (rejected 2/15) |
+| 1 | 86.7 % (rejected 1/15) | 20.0 % (rejected 7/15) | 100.0 % (rejected 0/15) | 80.0 % (rejected 0/15) |
+| 1.5 | 100.0 % (rejected 0/15) | 33.3 % (rejected 2/15) | 100.0 % (rejected 0/15) | 80.0 % (rejected 0/15) |
+| 2 | 100.0 % (rejected 0/15) | 26.7 % (rejected 0/15) | 100.0 % (rejected 0/15) | 33.3 % (rejected 0/15) |
+| 3 | 100.0 % (rejected 0/15) | 0.0 % (rejected 0/15) | 100.0 % (rejected 0/15) | 0.0 % (rejected 0/15) |
+
+## Lag between perception and control (rest at 1x)
+
+| Lag (ms) | Baseline | Actuator-aware | Baseline failures |
+|---|---|---|---|
+| 0 | 19/20 = 95 % | 19/20 = 95 % | collision fork face 1 |
+| 160 | 19/20 = 95 % | 19/20 = 95 % | collision fork face 1 |
+| 320 | 19/20 = 95 % | 19/20 = 95 % | collision fork face 1 |
+| 480 | 11/20 = 55 % | 19/20 = 95 % | collision fork face 4, collision fork wall 4, approach error too large 1 |
+| 640 | 3/20 = 15 % | 19/20 = 95 % | collision fork face 9, collision fork wall 7, approach error too large 1 |
+
+## Start layout
+
+| Facing at start | Errors | Baseline | Actuator-aware | Mean time (s) |
+|---|---|---|---|---|
+| entry edge ahead | 0x | 15/15 = 100.0 % | 15/15 = 100.0 % | 26 / 29 |
+| entry edge ahead | 1x | 15/15 = 100.0 % | 15/15 = 100.0 % | 29 / 40 |
+| entry edge ahead | 1.5x | 5/15 = 33.3 % | 12/15 = 80.0 % | 49 / 59 |
+| corner ahead | 0x | 15/15 = 100.0 % | 15/15 = 100.0 % | 31 / 35 |
+| corner ahead | 1x | 11/15 = 73.3 % | 15/15 = 100.0 % | 34 / 46 |
+| corner ahead | 1.5x | 1/15 = 6.7 % | 9/15 = 60.0 % | 55 / 72 |
+| side edge ahead | 0x | 15/15 = 100.0 % | 15/15 = 100.0 % | 35 / 40 |
+| side edge ahead | 1x | 11/15 = 73.3 % | 15/15 = 100.0 % | 40 / 49 |
+| side edge ahead | 1.5x | 0/15 = 0.0 % | 13/15 = 86.7 % | 60 / 74 |
 
 ## Detection alone (single scans)
 
-| Noise | Range (m) | Pallet found | Found but turned 90 deg | lateral p90 (mm) | angle p90 (deg) |
-|---|---|---|---|---|---|
-| 1x | 2 | 100.0 % | 0.0 % | 36.4 | 1.28 |
-| 1x | 3 | 100.0 % | 0.0 % | 31.6 | 1.41 |
-| 1x | 4 | 100.0 % | 0.0 % | 28.0 | 1.50 |
-| 1x | 5 | 100.0 % | 0.0 % | 26.3 | 1.43 |
-| 1x | 6 | 100.0 % | 0.0 % | 25.6 | 1.68 |
-| 1x | 7 | 100.0 % | 0.0 % | 22.0 | 1.45 |
-| 1x | 8 | 99.7 % | 0.0 % | 25.4 | 1.79 |
-| 2x | 2 | 100.0 % | 0.0 % | 48.1 | 2.70 |
-| 2x | 3 | 99.7 % | 0.3 % | 42.6 | 2.85 |
-| 2x | 4 | 99.0 % | 1.0 % | 44.0 | 3.25 |
-| 2x | 5 | 100.0 % | 0.0 % | 44.8 | 3.41 |
-| 2x | 6 | 99.3 % | 0.3 % | 36.1 | 2.93 |
-| 2x | 7 | 99.0 % | 0.3 % | 36.1 | 2.82 |
-| 2x | 8 | 98.7 % | 1.3 % | 46.3 | 3.68 |
+| Noise | Range (m) | Pallet found | Found but turned 90 deg | lateral p90 head on (mm) | angle p90 head on (deg) | lateral p90 any view (mm) |
+|---|---|---|---|---|---|---|
+| 1x | 1 | 100.0 % | 0.0 % | 8.9 | 0.44 | 17.3 |
+| 1x | 2 | 99.0 % | 1.0 % | 11.3 | 0.79 | 20.1 |
+| 1x | 3 | 100.0 % | 0.0 % | 19.7 | 1.52 | 24.5 |
+| 1x | 4 | 100.0 % | 0.0 % | 19.5 | 1.78 | 30.2 |
+| 1x | 5 | 99.0 % | 1.0 % | 24.2 | 1.96 | 23.2 |
+| 1x | 6 | 96.0 % | 1.0 % | 33.7 | 3.08 | 37.2 |
+| 1x | 7 | 95.0 % | 1.0 % | 31.2 | 3.19 | 38.0 |
+| 1x | 8 | 96.0 % | 1.0 % | 45.0 | 3.33 | 40.6 |
+| 2x | 1 | 98.0 % | 0.0 % | 19.1 | 1.67 | 54.1 |
+| 2x | 2 | 100.0 % | 0.0 % | 46.1 | 4.33 | 46.1 |
+| 2x | 3 | 100.0 % | 0.0 % | 34.1 | 3.20 | 38.8 |
+| 2x | 4 | 94.0 % | 0.0 % | 60.1 | 5.38 | 60.1 |
+| 2x | 5 | 92.0 % | 0.0 % | 42.5 | 4.34 | 42.5 |
+| 2x | 6 | 91.0 % | 0.0 % | 67.8 | 3.75 | 50.0 |
+| 2x | 7 | 86.0 % | 5.0 % | 189.4 | 6.46 | 63.4 |
+| 2x | 8 | 88.0 % | 0.0 % | 143.2 | 6.67 | 102.1 |

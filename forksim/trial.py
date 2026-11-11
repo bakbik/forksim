@@ -21,8 +21,8 @@ edge, end of trial), next to the robot's own estimate at handover:
     angle    between the pallet's entry edge and the truck's carriage face
              (= truck heading relative to the pallet axis)
 
-Seeding: (base_seed, trial) fully determines a trial. Three independent random
-streams are derived from it - scenario, sensor noise, process noise - and the
+Seeding: (base_seed, trial) fully determines a trial. Two independent random
+streams are derived from it - scenario and sensor noise - and the
 scenario stream always draws the same variates in the same order, so trial k
 has the same pallet, start pose and per-trial biases (up to scale) for every
 controller and every config. Comparisons are therefore paired.
@@ -95,8 +95,8 @@ class TrialRunner:
         if problems:
             raise ValueError("invalid configuration: " + "; ".join(problems))
         self.cfg, self.trial, self.manual = cfg, trial, manual
-        streams = np.random.SeedSequence([base_seed, trial]).spawn(3)
-        r_scn, self._r_sens, r_proc = (np.random.default_rng(s) for s in streams)
+        streams = np.random.SeedSequence([base_seed, trial]).spawn(2)
+        r_scn, self._r_sens = (np.random.default_rng(s) for s in streams)
         u = r_scn.uniform(-1.0, 1.0, 5)
         z = r_scn.standard_normal(4)
 
@@ -116,8 +116,7 @@ class TrialRunner:
         self.segs = np.array(segs)
 
         self.vehicle = ForkliftDynamics(vg, ce, cfg.dt, start,
-                                        steer_bias=math.radians(z[0] * ce.steer_bias_sigma_deg),
-                                        speed_scale=1.0 + z[1] * ce.speed_scale_sigma, rng=r_proc)
+                                        steer_bias=math.radians(z[0] * ce.steer_bias_sigma_deg))
         self.mount = (vg.fork_heel, 0.0, 0.0)                      # where perception believes the lidar is
         mount_true = (vg.fork_heel, z[3] * pe.lidar_lateral_bias_sigma,
                       math.radians(z[2] * pe.lidar_yaw_bias_sigma_deg))
@@ -212,7 +211,8 @@ class TrialRunner:
             self.bad_detections += 1
         else:
             self.det_err = (math.hypot(err[0], err[1]) * 1e3, math.degrees(wrap_half(err[2])))
-        self.ctrl.observe(compose(veh.odom, det.pallet), self.t)
+        from_range = math.hypot(det.pallet[0] - self.mount[0], det.pallet[1] - self.mount[1])
+        self.ctrl.observe(compose(veh.odom, det.pallet), self.t, from_range)
 
     # ------------------------------------------------------- collision check
     @staticmethod

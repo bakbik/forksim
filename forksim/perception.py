@@ -49,10 +49,15 @@ class Detection:
 
 
 class LidarPalletEstimator:
-    def __init__(self, pallet: Pallet, sensor_xy=(0.0, 0.0), inlier_tol: float = 0.04,
-                 min_points: int = 6, n_hypotheses: int = 80, max_lines: int = 10):
+    def __init__(self, pallet: Pallet, sensor_xy=(0.0, 0.0), noise_base: float = 0.006,
+                 noise_per_m: float = 0.003, min_points: int = 6, n_hypotheses: int = 80, max_lines: int = 10):
         self.pallet, self.sensor_xy = pallet, sensor_xy
-        self.tol, self.min_points, self.max_lines = inlier_tol, min_points, max_lines
+        # The scanner's noise model as its data sheet would give it: sigma = base + per_m * range.
+        # The detector leans on this: a point close to the sensor is held to a tight line, a far one
+        # to a loose line. These are the nominal values; the true noise may differ (that is an error
+        # source in its own right).
+        self.noise_base, self.noise_per_m = noise_base, noise_per_m
+        self.min_points, self.max_lines = min_points, max_lines
         # fixed sampling pattern: the detector is a deterministic function of its input
         self._u = np.random.default_rng(2024).random((max_lines, n_hypotheses, 2))
         self._block_c = np.array([0.5 * (a + b) for a, b in pallet.blocks])
@@ -73,11 +78,16 @@ class LidarPalletEstimator:
         ang = 0.5 * math.atan2(2.0 * float((dx * dy).sum()), float((dx * dx).sum() - (dy * dy).sum()))
         return mx, my, math.cos(ang), math.sin(ang)
 
+    def _sigma(self, px, py):
+        """Expected range noise of each point, from how far it is from the sensor."""
+        return self.noise_base + self.noise_per_m * np.hypot(px - self.sensor_xy[0], py - self.sensor_xy[1])
+
     def _ransac_line(self, px, py, u):
         """Most populated straight line among the points: (inlier mask, mx, my, tx, ty) or None."""
         n = px.size
         if n < self.min_points:
             return None
+        tol = np.clip(2.5 * self._sigma(px, py), 0.02, 0.08)      # per point: tight when close, loose when far
         i, j = (u[:, 0] * n).astype(int), (u[:, 1] * n).astype(int)
         dx, dy = px[j] - px[i], py[j] - py[i]
         norm = np.hypot(dx, dy)
@@ -85,13 +95,13 @@ class LidarPalletEstimator:
         norm = np.where(valid, norm, 1.0)
         nx, ny = -dy / norm, dx / norm
         dist = np.abs((px[None, :] - px[i][:, None]) * nx[:, None] + (py[None, :] - py[i][:, None]) * ny[:, None])
-        counts = np.where(valid, (dist < self.tol).sum(axis=1), 0)
-        mask = dist[int(counts.argmax())] < self.tol
+        counts = np.where(valid, (dist < tol[None, :]).sum(axis=1), 0)
+        mask = dist[int(counts.argmax())] < tol
         for _ in range(2):   # least-squares polish
             if mask.sum() < self.min_points:
                 return None
             mx, my, tx, ty = self._fit(px[mask], py[mask])
-            mask = np.abs((px - mx) * -ty + (py - my) * tx) < self.tol
+            mask = np.abs((px - mx) * -ty + (py - my) * tx) < tol
         if mask.sum() < self.min_points:
             return None
         return (mask, *self._fit(px[mask], py[mask]))
@@ -125,7 +135,24 @@ class LidarPalletEstimator:
                 keep = np.abs((px - mx) * nx + (py - my) * ny) > 0.15
                 px, py = px[keep], py[keep]
                 continue
-            idx, s = idx[run], s[run]
+            idx = idx[run]
+            # Keep only the points on the face itself. Through a pocket the scanner also sees the
+            # inside walls of the blocks; those lie just behind the face, on one side only, and
+            # would drag the fit sideways. How far "behind" counts depends on range.
+            for _ in range(2):
+                depth = (px[idx] - mx) * nx + (py[idx] - my) * ny
+                face = depth < np.quantile(depth, 0.3) + 1.5 * self._sigma(px[idx], py[idx])
+                if face.sum() < self.min_points or face.all():
+                    break
+                idx = idx[face]
+                mx, my, tx, ty = self._fit(px[idx], py[idx])
+                nx, ny = -ty, tx
+                if nx * (mx - self.sensor_xy[0]) + ny * (my - self.sensor_xy[1]) < 0:
+                    nx, ny = -nx, -ny
+                tx, ty = -ny, nx
+            s = (px[idx] - mx) * tx + (py[idx] - my) * ty
+            order = np.argsort(s)
+            idx, s = idx[order], s[order]
             px_rest, py_rest = np.delete(px, idx), np.delete(py, idx)
             if s.size < self.min_points:
                 px, py = px_rest, py_rest

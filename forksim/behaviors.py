@@ -77,7 +77,9 @@ class BehaviorParams:
     # detect
     init_scans: int = 5               # consistent detections needed to confirm a pallet
     detect_timeout: float = 15.0      # s without a confirmed pallet -> flag
-    ema_alpha: float = 0.4            # weight of each new detection once tracking
+    forget: float = 0.6               # how much of the accumulated confidence survives each new detection
+    range_trust: float = 0.5          # 1/m: lidar noise grows with range, so a detection from range r
+                                      # is weighted 1 / (1 + range_trust * r)^2. Closer looks count for more.
     # approach
     clearance: float = 0.75           # m that must be free of lidar returns around an approach position
     v_approach: float = 0.8           # m/s on the straight leg (capped by the truck's max_speed)
@@ -120,6 +122,7 @@ class PickupBehavior:
         self.angle_limit = math.nan  # deg: acceptance limit on the yaw error at the approach target
         self._edge_end = 0         # which entry edge was chosen: -1 or +1 along the pallet axis
         self._first = []
+        self._info = 0.0           # accumulated confidence in the tracked pallet pose
         self._last_obs_t = 0.0
         self._sub = "turn"
 
@@ -136,8 +139,8 @@ class PickupBehavior:
     def observe_coarse(self, xy_odom) -> None:
         self.coarse = xy_odom
 
-    def observe(self, pallet_odom, t: float) -> None:
-        """Feed one pallet detection (centre and axis angle, odometry frame).
+    def observe(self, pallet_odom, t: float, range_m: float = 0.0) -> None:
+        """Feed one pallet detection (centre and axis angle, odometry frame) made from `range_m` away.
         The axis angle is only meaningful modulo 180 deg: the pallet is symmetric."""
         if self.locked:
             return
@@ -152,11 +155,20 @@ class PickupBehavior:
                 n, a0 = len(self._first), self._first[0][2]
                 self.pallet = (sum(e[0] for e in self._first) / n, sum(e[1] for e in self._first) / n,
                                wrap(a0 + sum(wrap_half(e[2] - a0) for e in self._first) / n))
+                self._info = self._weight(range_m) / (1.0 - self.p.forget)
             return
-        a = self.p.ema_alpha
+        # Blend by confidence. Each detection is weighted by how far away it was made; old
+        # confidence fades (odometry drifts). At a constant range this is a plain moving average
+        # with weight 1 - forget; while closing in, the newer, closer looks dominate.
+        w = self._weight(range_m)
+        self._info = self.p.forget * self._info + w
+        a = w / self._info
         x, y, th = self.pallet
         self.pallet = (x + a * (pallet_odom[0] - x), y + a * (pallet_odom[1] - y),
                        wrap(th + a * wrap_half(pallet_odom[2] - th)))
+
+    def _weight(self, range_m: float) -> float:
+        return 1.0 / (1.0 + self.p.range_trust * range_m) ** 2
 
     def notify_loaded(self) -> None:
         """The pallet is against the carriage (contact switch)."""
@@ -180,17 +192,24 @@ class PickupBehavior:
         for end in (-1, 1):
             self._edge_end = end
             ax, ay, _ = self.approach_pose()
-            # free of lidar returns around the approach position?
+            # free of lidar returns around the approach position? (returns from the pallet itself
+            # do not count: with a small D the approach position is meant to be close to it)
             if self.map is not None and self.map.xy.size:
-                d2 = (self.map.xy[:, 0] - ax) ** 2 + (self.map.xy[:, 1] - ay) ** 2
-                if float(d2.min()) < self.p.clearance ** 2:
+                mx, my = self.map.xy[:, 0], self.map.xy[:, 1]
+                own = (mx - self.pallet[0]) ** 2 + (my - self.pallet[1]) ** 2 < (0.5 * math.hypot(self.pl.depth, self.pl.width) + 0.25) ** 2
+                d2 = ((mx - ax) ** 2 + (my - ay) ** 2)[~own]
+                if d2.size and float(d2.min()) < self.p.clearance ** 2:
                     continue
             # the straight leg must not cut through the pallet itself
             px, py = self.pallet[0] - odom[0], self.pallet[1] - odom[1]
             lx, ly = ax - odom[0], ay - odom[1]
             length2 = lx * lx + ly * ly
             s = max(0.0, min(1.0, (px * lx + py * ly) / length2)) if length2 > 1e-9 else 0.0
-            if math.hypot(px - s * lx, py - s * ly) < 0.5 * math.hypot(self.pl.depth, self.pl.width) + 0.5 * self.g.width + 0.1:
+            keep_off = 0.5 * math.hypot(self.pl.depth, self.pl.width) + 0.5 * self.g.width + 0.1
+            # ... but the approach position itself may be nearer than that (small D): then the rule
+            # is only that the truck never gets closer on the way than it will be when it arrives
+            keep_off = min(keep_off, math.hypot(px - lx, py - ly) - 0.05)
+            if math.hypot(px - s * lx, py - s * ly) < keep_off:
                 continue
             options.append((math.hypot(lx, ly), end))
         if not options:

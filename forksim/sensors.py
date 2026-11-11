@@ -27,7 +27,9 @@ class Lidar2D:
     def scan(self, robot_pose, segs: np.ndarray, rng) -> np.ndarray:
         sx, sy, sth = compose(robot_pose, self.mount_true)
         r = raycast((sx, sy), self.angles + sth, segs)
-        r = r + self.errs.lidar_range_sigma * rng.standard_normal(r.size)
+        # noise grows with range (this also covers the beam spot widening and blurring edges)
+        sigma = self.errs.lidar_range_sigma + self.errs.lidar_range_sigma_per_m * np.where(np.isfinite(r), r, 0.0)
+        r = r + sigma * rng.standard_normal(r.size)
         lost = rng.random(r.size) < self.errs.lidar_dropout
         r[lost | (r > self.spec.max_range) | (r <= 0.0)] = np.nan
         return r

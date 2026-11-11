@@ -129,7 +129,11 @@ class CameraSpec:
 
 @dataclass(frozen=True)
 class PerceptionErrors:
-    lidar_range_sigma: float = 0.015         # m, white noise per beam
+    # Range noise grows with distance: sigma = lidar_range_sigma + lidar_range_sigma_per_m * range.
+    # The growing term also stands in for the beam spot widening and blurring edges. At 1x this is
+    # 12 mm at 2 m, 15 mm at 3 m, 30 mm at 8 m - so a closer look is a better look.
+    lidar_range_sigma: float = 0.006         # m, noise right at the sensor
+    lidar_range_sigma_per_m: float = 0.003   # m of extra noise per metre of range
     lidar_dropout: float = 0.02              # probability a beam returns nothing
     lidar_yaw_bias_sigma_deg: float = 0.5    # extrinsic calibration error, constant per trial
     lidar_lateral_bias_sigma: float = 0.005  # m, extrinsic calibration error, constant per trial
@@ -144,20 +148,15 @@ class PerceptionErrors:
 class ControlErrors:
     steer_bias_sigma_deg: float = 1.0   # steering zero offset, constant per trial
     steer_lag: float = 0.25             # s, first-order steering actuator
-    steer_rate_limit_deg: float = 40.0  # deg/s (inf = ideal actuator)
+    steer_rate_limit_deg: float = 40.0  # deg/s. Scales inversely: 2x error = half the rate, 0x = no limit
     cmd_latency: float = 0.10           # s, pure delay on commands
     speed_lag: float = 0.40             # s, first-order drive response
-    speed_scale_sigma: float = 0.01     # wheel radius error: true speed = scale * encoder speed
-    slip_sigma_deg: float = 0.2         # unobserved heading random walk, deg per sqrt(metre)
 
-    _SCALED = ("steer_bias_sigma_deg", "steer_lag", "cmd_latency", "speed_lag",
-               "speed_scale_sigma", "slip_sigma_deg")
+    _SCALED = ("steer_bias_sigma_deg", "steer_lag", "cmd_latency", "speed_lag")
 
     def scaled(self, s: float) -> "ControlErrors":
         out = replace(self, **{k: getattr(self, k) * s for k in self._SCALED})
-        if s == 0:
-            out = replace(out, steer_rate_limit_deg=math.inf)
-        return out
+        return replace(out, steer_rate_limit_deg=self.steer_rate_limit_deg / s if s > 0 else math.inf)
 
 
 @dataclass(frozen=True)

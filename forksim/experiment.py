@@ -1,6 +1,6 @@
 """Monte Carlo experiments.
 
-    python -m forksim.experiment                 # everything, ~15k trials
+    python -m forksim.experiment                 # everything, ~2.4k trials, about 5 minutes
     python -m forksim.experiment --quick         # 10x fewer trials, for a fast look
     python -m forksim.experiment --seed 7        # a different, equally reproducible set
 
@@ -32,12 +32,19 @@ from .perception import LidarPalletEstimator
 from .sensors import Lidar2D
 from .trial import OUTCOMES, run_trial
 
-SCALES = (0.0, 0.5, 1.0, 1.5, 2.0)
+SCALES = (0.0, 1.0, 1.5, 2.0)
 STRESS = 1.5   # sensitivity is measured around STRESS x nominal, where pick-ups start to fail
+D_VALUES = (0.3, 0.5, 1.0, 1.5, 2.0, 3.0)         # approach distance sweep, metres
+# what the truck is looking at when it starts: nominal pallet angle (the truck heads along +y, 90 deg)
+LAYOUTS = {"entry edge ahead": 90.0, "corner ahead": 45.0, "side edge ahead": 0.0}
+# Lag between perception and control: how stale the scan is plus how late the command acts.
+# Swept as a multiple of the nominal 60 ms + 100 ms, everything else left at 1x.
+LAG_FACTORS = (0.0, 1.0, 2.0, 3.0, 4.0)
 
 # one-at-a-time sensitivity: label -> config field. Each is set to 0x and 2x its stressed value.
 SENSITIVITY = {
-    "lidar range noise": "perception.lidar_range_sigma",
+    "lidar noise at the sensor": "perception.lidar_range_sigma",
+    "lidar noise growth with range": "perception.lidar_range_sigma_per_m",
     "lidar dropout": "perception.lidar_dropout",
     "lidar mount yaw error": "perception.lidar_yaw_bias_sigma_deg",
     "lidar mount lateral error": "perception.lidar_lateral_bias_sigma",
@@ -47,8 +54,6 @@ SENSITIVITY = {
     "steering rate limit": "control.steer_rate_limit_deg",
     "command latency": "control.cmd_latency",
     "drive lag": "control.speed_lag",
-    "wheel scale error": "control.speed_scale_sigma",
-    "floor slip": "control.slip_sigma_deg",
 }
 
 
@@ -62,20 +67,34 @@ def _level(cfg: SimConfig, path: str, factor: float) -> SimConfig:
 
 def build_cells(n_scale: float) -> list:
     """Each cell is one (config, controller) combination run for n trials."""
-    n = lambda base: max(20, int(round(base * n_scale)))
+    n = lambda base: max(5, int(round(base * n_scale)))
     stressed = scaled(STRESS, STRESS)
     cells = []
     for ctrl in CONTROLLERS:
         for label, cfg in (("ideal", scaled(0, 0)), ("nominal", nominal()), ("stressed", stressed)):
-            cells.append(dict(exp="headline", label=label, controller=ctrl, cfg=cfg, n=n(500)))
+            cells.append(dict(exp="headline", label=label, controller=ctrl, cfg=cfg, n=n(80)))
         for ps in SCALES:
             for cs in SCALES:
                 cells.append(dict(exp="grid", label=f"p{ps:g}_c{cs:g}", perception_scale=ps, control_scale=cs,
-                                  controller=ctrl, cfg=scaled(ps, cs), n=n(120)))
+                                  controller=ctrl, cfg=scaled(ps, cs), n=n(20)))
         for label, path in SENSITIVITY.items():
             for factor in (0.0, 2.0):
                 cells.append(dict(exp="sensitivity", label=label, factor=factor, controller=ctrl,
-                                  cfg=_level(stressed, path, factor), n=n(150)))
+                                  cfg=_level(stressed, path, factor), n=n(15)))
+        for level in (1.0, STRESS):
+            for d in D_VALUES:
+                cells.append(dict(exp="d_sweep", label=f"D={d:g}", D=d, level=level, controller=ctrl,
+                                  cfg=override(scaled(level, level), {"task.approach_distance": d}), n=n(15)))
+        for f in LAG_FACTORS:
+            base = nominal()
+            lag = dict(scan=base.perception.time_sync_error * f, cmd=base.control.cmd_latency * f)
+            cells.append(dict(exp="lag", label=f"lag {f:g}x", lag_ms=round(1e3 * (lag["scan"] + lag["cmd"])), level=1.0,
+                              controller=ctrl, n=n(20), cfg=override(base, {
+                                  "perception.time_sync_error": lag["scan"], "control.cmd_latency": lag["cmd"]})))
+        for level in (0.0, 1.0, STRESS):
+            for label, angle in LAYOUTS.items():
+                cells.append(dict(exp="layout", label=label, level=level, controller=ctrl,
+                                  cfg=override(scaled(level, level), {"pallet.angle_deg": angle}), n=n(15)))
     return cells
 
 
@@ -129,7 +148,7 @@ def perception_study(n: int, seed: int) -> list:
             segs += rect_segments(0.0, cfg.pallet.depth, y0, y1, edge)
         segs += rect_segments(0.0, cfg.room.width, 0.0, cfg.room.height, (0.0, 0.0, 0.0))
         segs = np.array(segs)
-        for rng_m in (2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0):
+        for rng_m in (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0):
             rng = np.random.default_rng([seed, int(scale * 10), int(rng_m * 10)])
             lidar = Lidar2D(cfg.lidar, cfg.perception, (0.0, 0.0, 0.0))
             for _ in range(n):
@@ -172,12 +191,12 @@ def main(argv=None) -> None:
     with Pool(args.workers) as pool:
         for done, (i, res) in enumerate(pool.imap_unordered(_job, jobs, chunksize=16), 1):
             rows[i].append(res)
-            if done % 1000 == 0:
+            if done % 400 == 0:
                 print(f"  {done}/{len(jobs)}  {time.perf_counter() - t0:.0f} s", flush=True)
     for r in rows:
         r.sort(key=lambda d: d["trial"])
 
-    meta_keys = ("exp", "label", "perception_scale", "control_scale", "factor")
+    meta_keys = ("exp", "label", "perception_scale", "control_scale", "factor", "D", "level", "lag_ms")
     with open(out / "trials.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=[*meta_keys, *rows[0][0].keys()])
         w.writeheader()
@@ -185,13 +204,14 @@ def main(argv=None) -> None:
             meta = {k: cell.get(k, "") for k in meta_keys}
             w.writerows({**meta, **r} for r in cell_rows)
 
-    perc = perception_study(60 if args.quick else 300, args.seed)
+    perc = perception_study(30 if args.quick else 100, args.seed)
     with open(out / "perception.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(perc[0].keys()))
         w.writeheader()
         w.writerows(perc)
 
     summary = dict(seed=args.seed, trials=len(jobs), outcomes=list(OUTCOMES), scales=list(SCALES), stress=STRESS,
+                   d_values=list(D_VALUES), layouts=list(LAYOUTS), lag_factors=list(LAG_FACTORS),
                    cells=[summarise(c, r) for c, r in zip(cells, rows)])
     (out / "summary.json").write_text(json.dumps(summary, indent=1))
     print(f"done in {time.perf_counter() - t0:.0f} s -> {out}/", flush=True)
