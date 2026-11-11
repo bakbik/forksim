@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>forksim - pallet pickup simulator</title>
+<style>
+:root {
+  --bg: #f3f2ee; --panel: #ffffff; --ink: #1c1e21; --muted: #666c74; --line: #d8d6cf;
+  --accent: #d9480f; --good: #2b8a3e; --bad: #c92a2a; --warn: #b35c00;
+  --floor: #e9e7e0; --grid: #dad8d0; --lidar: #1864ab; --cached: #98a2ad; --truck: #2f3640; --pallet: #a9773e;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121315; --panel: #1a1c1f; --ink: #e8e9eb; --muted: #969da6; --line: #2d3136;
+    --accent: #ff922b; --good: #51cf66; --bad: #ff6b6b; --warn: #fcc419;
+    --floor: #1e2125; --grid: #2a2e33; --lidar: #4dabf7; --cached: #59636e; --truck: #c9ced6; --pallet: #c99a5b;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+button, select, input { font: inherit; color: inherit; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: auto minmax(0, 1fr); height: 100vh; }
+header { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .01em; }
+header h1 span { color: var(--muted); font-weight: 400; }
+.phases { display: flex; gap: 4px; align-items: center; margin-left: auto; flex-wrap: wrap; }
+.phases i { font-style: normal; font-size: 12px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); }
+.phases i.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.phases i.was { color: var(--ink); }
+.phases b { color: var(--line); font-weight: 400; }
+.stage { position: relative; min-height: 320px; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+.banner { position: absolute; left: 12px; right: 12px; top: 12px; padding: 9px 12px; border-radius: 8px; font-weight: 600; background: var(--panel); border: 1px solid var(--line); display: none; }
+.banner.good { display: block; border-color: var(--good); color: var(--good); }
+.banner.bad { display: block; border-color: var(--bad); color: var(--bad); }
+.banner.warn { display: block; border-color: var(--warn); color: var(--warn); }
+.loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); background: var(--bg); text-align: center; padding: 24px; }
+.legend { position: absolute; left: 12px; bottom: 10px; display: flex; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); background: color-mix(in srgb, var(--panel) 85%, transparent); padding: 5px 9px; border-radius: 6px; }
+.legend span::before { content: ""; display: inline-block; width: 14px; height: 3px; margin-right: 5px; vertical-align: middle; background: var(--c); }
+aside { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tabs button { flex: 1; padding: 10px 4px; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); cursor: pointer; }
+.tabs button.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.pane { display: none; padding: 14px 16px 20px; overflow: auto; }
+.pane.on { display: block; }
+h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 16px 0 6px; font-weight: 600; }
+h2:first-child { margin-top: 0; }
+.row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.row label { flex: 1; }
+.row input[type=number], .row select { width: 118px; padding: 4px 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; }
+.row .unit { width: 30px; color: var(--muted); font-size: 12px; }
+.row input[type=range] { flex: 1; accent-color: var(--accent); }
+.row output { width: 44px; text-align: right; font-family: var(--mono); font-size: 12.5px; }
+.btns { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.btn { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); cursor: pointer; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn:disabled { opacity: .5; cursor: default; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td, th { padding: 4px 0; border-bottom: 1px solid var(--line); text-align: left; font-weight: 400; }
+td.n, th.n { text-align: right; font-family: var(--mono); font-size: 12.5px; }
+th { color: var(--muted); font-size: 12px; }
+.hint { color: var(--muted); font-size: 12.5px; margin: 6px 0; }
+.check { display: flex; gap: 7px; align-items: center; margin: 4px 0; }
+.check input { accent-color: var(--accent); }
+kbd { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--bg); }
+.ok { color: var(--good); } .no { color: var(--bad); }
+@media (max-width: 860px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 58vh auto; height: auto; }
+  aside { border-left: 0; border-top: 1px solid var(--line); }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>forksim <span>pallet pickup, lidar only</span></h1>
+    <div class="phases" id="phases">
+      <i data-p="detect">detect</i><b>&rsaquo;</b><i data-p="approach">approach</i><b>&rsaquo;</b><i data-p="align">align</i><b>&rsaquo;</b><i data-p="loaded">loaded</i>
+    </div>
+  </header>
+
+  <div class="stage">
+    <canvas id="cv" tabindex="0" aria-label="Top-down view of the room, the truck and the pallet"></canvas>
+    <div class="banner" id="banner" role="status"></div>
+    <div class="legend">
+      <span style="--c: var(--lidar)">lidar, this scan</span>
+      <span style="--c: var(--cached)">cached map</span>
+      <span style="--c: var(--good)">entry edge</span>
+      <span style="--c: var(--bad)">side edge</span>
+      <span style="--c: var(--accent)">robot's estimate</span>
+    </div>
+    <div class="loading" id="loading">Loading the Python simulator into the browser&hellip;<br>(first load fetches about 10 MB)</div>
+  </div>
+
+  <aside>
+    <div class="tabs" role="tablist">
+      <button class="on" data-tab="run">Run</button>
+      <button data-tab="props">Properties</button>
+      <button data-tab="errors">Errors</button>
+      <button data-tab="batch">Batch</button>
+    </div>
+
+    <div class="pane on" id="tab-run">
+      <div class="row"><label for="controller">Driver</label>
+        <select id="controller"><option value="actuator_aware">Actuator-aware</option><option value="baseline">Baseline</option><option value="manual">Manual (keyboard)</option></select></div>
+      <div class="row"><label for="trial">Trial number</label><input type="number" id="trial" value="0" min="0" step="1"></div>
+      <label class="check"><input type="checkbox" id="vary" checked> vary pallet and start pose per trial</label>
+      <div class="btns">
+        <button class="btn primary" id="play">Start</button>
+        <button class="btn" id="restart">Restart</button>
+        <button class="btn" id="next">Next trial</button>
+      </div>
+      <div class="row"><label for="speed">Speed</label>
+        <select id="speed"><option value="1">1x</option><option value="2" selected>2x</option><option value="5">5x</option><option value="15">15x</option></select></div>
+      <div class="row"><label for="view">View</label>
+        <select id="view"><option value="follow">Follow truck and pallet</option><option value="room">Whole room</option></select></div>
+      <p class="hint" id="manualhint" hidden>Click the view, then drive: <kbd>&uarr;</kbd> <kbd>&darr;</kbd> speed, <kbd>&larr;</kbd> <kbd>&rarr;</kbd> steer, hold <kbd>Shift</kbd> for full lock (pivot on the spot).</p>
+
+      <h2>Now</h2>
+      <table>
+        <tr><td>Phase</td><td class="n" id="o-phase">-</td></tr>
+        <tr><td>Time</td><td class="n" id="o-t">-</td></tr>
+        <tr><td>Fork tip past entry edge</td><td class="n" id="o-depth">-</td></tr>
+      </table>
+      <h2>Alignment errors</h2>
+      <table>
+        <tr><th></th><th class="n">truth</th><th class="n">robot thinks</th></tr>
+        <tr><td>Lateral offset</td><td class="n" id="o-lat">-</td><td class="n" id="o-late">-</td></tr>
+        <tr><td>Angle to edge</td><td class="n" id="o-ang">-</td><td class="n" id="o-ange">-</td></tr>
+      </table>
+      <p class="hint" id="o-limit"></p>
+      <p class="hint" id="o-tol"></p>
+      <h2>Layers</h2>
+      <label class="check"><input type="checkbox" id="l-scan" checked> lidar returns</label>
+      <label class="check"><input type="checkbox" id="l-cached" checked> cached map</label>
+      <label class="check"><input type="checkbox" id="l-edges" checked> detected edges</label>
+      <label class="check"><input type="checkbox" id="l-est" checked> estimated pallet and approach pose</label>
+      <label class="check"><input type="checkbox" id="l-truth" checked> true pallet</label>
+    </div>
+
+    <div class="pane" id="tab-props">
+      <div id="props"></div>
+      <div class="btns"><button class="btn primary" id="apply">Apply and restart</button><button class="btn" id="defaults">Defaults</button></div>
+      <p class="hint">Origin is the bottom-left corner of the room. Angles are counter-clockwise from the x axis. The pallet angle is the direction forks travel through it.</p>
+    </div>
+
+    <div class="pane" id="tab-errors">
+      <p class="hint">How far the world is from the ideal simulator. 0 = ideal, 1 = the assumed real truck.</p>
+      <div class="row"><label for="ps">Perception error</label><input type="range" id="ps" min="0" max="3" step="0.25" value="1"><output id="ps-o">1x</output></div>
+      <div class="row"><label for="cs">Control error</label><input type="range" id="cs" min="0" max="3" step="0.25" value="1"><output id="cs-o">1x</output></div>
+      <div class="btns"><button class="btn primary" id="apply2">Apply and restart</button></div>
+      <p class="hint">Perception: lidar range noise, dropout, mounting error, scan timing.<br>Control: steering zero offset, lag, rate limit, command delay, drive lag, wheel scale, slip.</p>
+    </div>
+
+    <div class="pane" id="tab-batch">
+      <p class="hint">Runs many trials with the current properties and error levels, for both drivers. Same trial numbers for both, so they face the same situations.</p>
+      <div class="row"><label for="bn">Trials</label><select id="bn"><option>10</option><option selected>20</option><option>40</option></select></div>
+      <div class="btns"><button class="btn primary" id="brun">Run batch</button></div>
+      <p class="hint" id="bprog"></p>
+      <div id="bout"></div>
+    </div>
+  </aside>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script>
+"use strict";
+// Python files the page loads. tests/test_web.py checks this list against the package.
+const FILES = ["__init__.py", "config.py", "geometry.py", "vehicle.py", "sensors.py", "mapping.py",
+               "perception.py", "behaviors.py", "trial.py", "webapi.py"];
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+let api = null, world = null, st = null, running = false, trail = [], defaults = {}, keys = {};
+let scan = [], cached = [], edges = [];
+
+async function boot() {
+  try {
+    const py = await loadPyodide();
+    await py.loadPackage("numpy");
+    py.FS.mkdirTree("/home/pyodide/forksim");
+    for (const f of FILES) {
+      const r = await fetch("../forksim/" + f, {cache: "no-store"});
+      if (!r.ok) throw new Error("could not load forksim/" + f);
+      py.FS.writeFile("/home/pyodide/forksim/" + f, await r.text());
+    }
+    py.runPython("import sys; sys.path.insert(0, '/home/pyodide')");
+    api = py.pyimport("forksim.webapi");
+    buildProps(JSON.parse(api.describe()));
+    $("loading").remove();
+    reset();
+  } catch (e) {
+    $("loading").textContent = "Could not start the simulator: " + e.message;
+    console.error(e);
+  }
+}
+
+// ---------------------------------------------------------------- controls
+function buildProps(d) {
+  let h = "";
+  for (const [title, rows] of d.groups) {
+    h += `<h2>${title}</h2>`;
+    for (const [label, path, unit, step, value] of rows) {
+      defaults[path] = value;
+      h += `<div class="row"><label for="p-${path}">${label}</label><input type="number" id="p-${path}" data-path="${path}" step="${step}" value="${value}"><span class="unit">${unit}</span></div>`;
+    }
+  }
+  $("props").innerHTML = h;
+}
+function params() {
+  const props = {};
+  document.querySelectorAll("#props input").forEach(i => { if (i.value !== "") props[i.dataset.path] = +i.value; });
+  return {controller: $("controller").value, trial: +$("trial").value || 0, seed: 0, vary: $("vary").checked,
+          perception_scale: +$("ps").value, control_scale: +$("cs").value, props};
+}
+function reset() {
+  if (!api) return;
+  world = JSON.parse(api.start(JSON.stringify(params())));
+  trail = []; scan = []; cached = []; edges = [];
+  take(JSON.parse(api.advance(0, "")));
+  running = false; $("play").textContent = "Start";
+  $("manualhint").hidden = $("controller").value !== "manual";
+  const t = world.truck, b = world.pallet.blocks;
+  const tol = Math.min(b[2][0] - (t.fork_spacing / 2 + t.fork_width / 2), (t.fork_spacing / 2 - t.fork_width / 2) - b[1][1]) * 1000;
+  $("o-tol").textContent = `Forks have ${tol.toFixed(0)} mm of room each side inside a pocket.`;
+  draw();
+}
+function take(s) {
+  st = s;
+  if (s.scan) { scan = s.scan; cached = s.cached; edges = s.edges; }
+  trail.push([s.truck[0], s.truck[1]]);
+  if (trail.length > 4000) trail.shift();
+  if (s.done) { running = false; $("play").textContent = "Start"; }
+  readout();
+}
+const fmt = (v, d, u) => v === null || v === undefined ? "-" : v.toFixed(d) + " " + u;
+function readout() {
+  const s = st;
+  $("o-phase").textContent = s.step; $("o-t").textContent = fmt(s.t, 1, "s");
+  $("o-depth").textContent = fmt(s.depth === null ? null : s.depth * 1000, 0, "mm");
+  $("o-lat").textContent = fmt(s.lat, 1, "mm"); $("o-late").textContent = fmt(s.lat_est, 1, "mm");
+  $("o-ang").textContent = fmt(s.ang, 2, "deg"); $("o-ange").textContent = fmt(s.ang_est, 2, "deg");
+  $("o-limit").textContent = s.angle_limit === null ? "" : `Angle accepted at the approach target: up to ${s.angle_limit.toFixed(2)} deg (from D and the turning radius).`;
+  const order = ["detect", "approach", "align", "loaded"], at = order.indexOf(s.phase);
+  document.querySelectorAll("#phases i").forEach((el, i) => { el.className = i === at ? "on" : (at > i ? "was" : ""); });
+  const b = $("banner");
+  if (!s.done) { b.className = "banner"; b.textContent = ""; return; }
+  if (s.outcome === "success") { b.className = "banner good"; b.textContent = `Pallet loaded after ${s.t.toFixed(1)} s. Lateral ${fmt(s.lat, 1, "mm")}, angle ${fmt(s.ang, 2, "deg")} at contact.`; }
+  else if (s.outcome.startsWith("collision")) { b.className = "banner bad"; b.textContent = `${s.alert}. Simulation stopped (${s.outcome}).`; }
+  else { b.className = "banner warn"; b.textContent = `Stopped: ${s.outcome.replaceAll("_", " ")}. ${s.alert || ""}`; }
+}
+
+document.querySelectorAll(".tabs button").forEach(btn => btn.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === btn));
+  document.querySelectorAll(".pane").forEach(x => x.classList.toggle("on", x.id === "tab-" + btn.dataset.tab));
+});
+$("play").onclick = () => { if (!st) return; if (st.done) reset(); running = !running; $("play").textContent = running ? "Pause" : "Start"; if (running && $("controller").value === "manual") cv.focus(); };
+$("restart").onclick = reset;
+$("next").onclick = () => { $("trial").value = (+$("trial").value || 0) + 1; reset(); running = true; $("play").textContent = "Pause"; };
+$("apply").onclick = $("apply2").onclick = reset;
+$("defaults").onclick = () => { document.querySelectorAll("#props input").forEach(i => i.value = defaults[i.dataset.path]); reset(); };
+["controller", "trial", "vary"].forEach(id => $(id).onchange = reset);
+["view", "l-scan", "l-cached", "l-edges", "l-est", "l-truth"].forEach(id => $(id).onchange = draw);
+for (const id of ["ps", "cs"]) $(id).oninput = () => $(id + "-o").textContent = (+$(id).value) + "x";
+addEventListener("keydown", e => { if (document.activeElement === cv) { keys[e.key] = true; if (e.key.startsWith("Arrow")) e.preventDefault(); } });
+addEventListener("keyup", e => { keys[e.key] = false; });
+cv.addEventListener("blur", () => { keys = {}; });
+
+function manualAction() {
+  const lock = keys.Shift ? 1.5708 : 0.5;
+  const v = (keys.ArrowUp ? 0.5 : 0) - (keys.ArrowDown ? 0.5 : 0);
+  const steer = ((keys.ArrowLeft ? 1 : 0) - (keys.ArrowRight ? 1 : 0)) * lock;
+  // pivoting needs the drive wheel turning even without a forward key
+  return [keys.Shift && steer && !v ? 0.25 : v, steer];
+}
+
+// ---------------------------------------------------------------- batch
+$("brun").onclick = async () => {
+  if (!api) return;
+  const n = +$("bn").value, p = JSON.stringify(params()), tot = {};
+  $("brun").disabled = true; running = false; $("play").textContent = "Start";
+  for (let k = 0; k < n; k += 2) {
+    $("bprog").textContent = `Running trial ${k + 1} of ${n}...`;
+    await new Promise(r => setTimeout(r, 10));
+    const part = JSON.parse(api.batch(p, k, Math.min(2, n - k)));
+    for (const [c, v] of Object.entries(part)) {
+      tot[c] ??= {n: 0, success: 0, outcomes: {}};
+      tot[c].n += v.n; tot[c].success += v.success;
+      for (const [o, m] of Object.entries(v.outcomes)) tot[c].outcomes[o] = (tot[c].outcomes[o] || 0) + m;
+    }
+    let h = "<table><tr><th>Driver</th><th class='n'>Loaded</th></tr>";
+    for (const [c, v] of Object.entries(tot)) {
+      const fails = Object.entries(v.outcomes).filter(([o]) => o !== "success").sort((a, b) => b[1] - a[1]).map(([o, m]) => `${o.replaceAll("_", " ")} ${m}`).join(", ");
+      h += `<tr><td>${c.replace("_", "-")}<div class="hint">${fails || "no failures"}</div></td><td class="n">${v.success} / ${v.n}</td></tr>`;
+    }
+    $("bout").innerHTML = h + "</table>";
+  }
+  $("bprog").textContent = `Done: ${n} trials per driver.`;
+  $("brun").disabled = false;
+};
+
+// ---------------------------------------------------------------- drawing
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+function fit() {
+  const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * d) || cv.height !== Math.round(r.height * d)) { cv.width = Math.round(r.width * d); cv.height = Math.round(r.height * d); }
+  return [r.width, r.height, d];
+}
+function poly(pose, pts) {           // polygon given in a local frame
+  const c = Math.cos(pose[2]), s = Math.sin(pose[2]);
+  ctx.beginPath();
+  pts.forEach(([x, y], i) => { const X = pose[0] + c * x - s * y, Y = pose[1] + s * x + c * y; i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+  ctx.closePath();
+}
+const rect = (x0, x1, y0, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+function dots(arr, size) { for (let i = 0; i < arr.length; i += 2) ctx.fillRect(arr[i] - size / 2, arr[i + 1] - size / 2, size, size); }
+
+function draw() {
+  if (!world || !st) return;
+  const [w, h, dpr] = fit(), [rw, rh] = world.room, P = world.pallet, T = world.truck;
+  // which part of the room to show
+  let cx = rw / 2, cy = rh / 2, span = Math.max(rw, rh * w / h) + 1.5;
+  if ($("view").value === "follow") {
+    const px = P.pose[0] + Math.cos(P.pose[2]) * P.depth / 2, py = P.pose[1] + Math.sin(P.pose[2]) * P.depth / 2;
+    cx = (px + st.truck[0]) / 2; cy = (py + st.truck[1]) / 2;
+    span = Math.max(7, Math.abs(px - st.truck[0]) + 5, (Math.abs(py - st.truck[1]) + 5) * w / h);
+  }
+  const k = w / span * dpr, px1 = 1 / k * dpr;       // k: device px per metre; px1: one css pixel in metres
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = css("--bg"); ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(k, 0, 0, -k, cv.width / 2 - cx * k, cv.height / 2 + cy * k);
+
+  // room floor, grid every metre, walls
+  ctx.fillStyle = css("--floor"); ctx.fillRect(0, 0, rw, rh);
+  ctx.strokeStyle = css("--grid"); ctx.lineWidth = px1 * 0.6; ctx.beginPath();
+  for (let x = 1; x < rw; x++) { ctx.moveTo(x, 0); ctx.lineTo(x, rh); }
+  for (let y = 1; y < rh; y++) { ctx.moveTo(0, y); ctx.lineTo(rw, y); }
+  ctx.stroke();
+  ctx.strokeStyle = css("--ink"); ctx.lineWidth = px1 * 2; ctx.strokeRect(0, 0, rw, rh);
+
+  if ($("l-cached").checked) { ctx.fillStyle = css("--cached"); dots(cached, px1 * 2); }
+
+  // true pallet: blocks, then its four edges (two entry, two side)
+  if ($("l-truth").checked) {
+    ctx.fillStyle = css("--pallet"); ctx.globalAlpha = 0.85;
+    for (const [y0, y1] of P.blocks) { poly(P.pose, rect(0, P.depth, y0, y1)); ctx.fill(); }
+    ctx.globalAlpha = 1; ctx.lineWidth = px1 * 2.5;
+    const hw = P.width / 2, c = Math.cos(P.pose[2]), s = Math.sin(P.pose[2]);
+    const seg = (x0, y0, x1, y1, col) => { ctx.strokeStyle = col; ctx.beginPath(); ctx.moveTo(P.pose[0] + c * x0 - s * y0, P.pose[1] + s * x0 + c * y0); ctx.lineTo(P.pose[0] + c * x1 - s * y1, P.pose[1] + s * x1 + c * y1); ctx.stroke(); };
+    seg(0, -hw, 0, hw, css("--good")); seg(P.depth, -hw, P.depth, hw, css("--good"));
+    seg(0, -hw, P.depth, -hw, css("--bad")); seg(0, hw, P.depth, hw, css("--bad"));
+  }
+
+  if ($("l-scan").checked) { ctx.fillStyle = css("--lidar"); dots(scan, px1 * 2.4); }
+
+  if ($("l-edges").checked) {
+    ctx.lineWidth = px1 * 4; ctx.globalAlpha = 0.55;
+    for (const [kind, x0, y0, x1, y1] of edges) {
+      ctx.strokeStyle = kind === "entry" ? css("--good") : kind === "side" ? css("--bad") : css("--muted");
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // what the robot believes: pallet outline, chosen entry-edge centre, approach pose
+  if ($("l-est").checked && st.pallet_est) {
+    ctx.strokeStyle = css("--accent"); ctx.lineWidth = px1 * 1.5; ctx.setLineDash([px1 * 6, px1 * 4]);
+    poly(st.pallet_est, rect(-P.depth / 2, P.depth / 2, -P.width / 2, P.width / 2)); ctx.stroke();
+    if (st.approach) {
+      poly(st.approach, rect(-T.body_rear, T.heel, -T.width / 2, T.width / 2)); ctx.stroke();
+      poly(st.approach, rect(T.heel, T.reach, -T.fork_spacing / 2 - T.fork_width / 2, T.fork_spacing / 2 + T.fork_width / 2)); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = css("--accent"); ctx.beginPath(); ctx.arc(st.edge_est[0], st.edge_est[1], px1 * 4, 0, 7); ctx.fill();
+      ctx.lineWidth = px1; ctx.beginPath(); ctx.moveTo(st.approach[0], st.approach[1]); ctx.lineTo(st.edge_est[0], st.edge_est[1]); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+
+  // trail and truck
+  ctx.strokeStyle = css("--muted"); ctx.lineWidth = px1; ctx.beginPath();
+  trail.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke();
+  const tr = st.truck;
+  ctx.fillStyle = css("--truck");
+  poly(tr, rect(-T.body_rear, T.heel, -T.width / 2, T.width / 2)); ctx.fill();
+  for (const yc of [T.fork_spacing / 2, -T.fork_spacing / 2]) { poly(tr, rect(T.heel, T.reach, yc - T.fork_width / 2, yc + T.fork_width / 2)); ctx.fill(); }
+  // drive wheel, turned to its steering angle (a steer to the left swings the wheel right: it is at the back)
+  const wx = tr[0] - Math.cos(tr[2]) * T.wheelbase, wy = tr[1] - Math.sin(tr[2]) * T.wheelbase;
+  ctx.fillStyle = css("--accent"); poly([wx, wy, tr[2] - st.steer], rect(-0.13, 0.13, -0.045, 0.045)); ctx.fill();
+  ctx.beginPath(); ctx.arc(tr[0], tr[1], px1 * 2.5, 0, 7); ctx.fill();
+
+  // scale bar, in screen space
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const bar = span > 16 ? 5 : 1, len = bar * w / span;
+  ctx.strokeStyle = ctx.fillStyle = css("--muted"); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(w - 16 - len, h - 16); ctx.lineTo(w - 16, h - 16); ctx.stroke();
+  ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "right"; ctx.fillText(bar + " m", w - 16, h - 22);
+}
+
+let last = performance.now(), acc = 0;
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (running && api && st && !st.done) {
+    acc += dt * (+$("speed").value) / 0.02;
+    const n = Math.min(60, Math.floor(acc)); acc -= Math.floor(acc);
+    if (n > 0) take(JSON.parse(api.advance(n, $("controller").value === "manual" ? JSON.stringify(manualAction()) : "")));
+  }
+  draw();
+  requestAnimationFrame(frame);
+}
+new ResizeObserver(draw).observe(cv);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+requestAnimationFrame(frame);
+boot();
+</script>
+</body>
+</html>

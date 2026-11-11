@@ -1,0 +1,16 @@
+[project]
+name = "forksim"
+version = "0.1.0"
+description = "Small 2D forklift pallet-pickup simulator for asking when a simulator's success rate can be believed"
+requires-python = ">=3.11"
+dependencies = ["numpy"]
+
+[project.optional-dependencies]
+report = ["matplotlib"]
+dev = ["pytest", "matplotlib"]
+
+[tool.setuptools]
+packages = ["forksim"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
