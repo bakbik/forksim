@@ -109,7 +109,8 @@ kbd { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--line)
       <div class="row"><label for="controller">Driver</label>
         <select id="controller"><option value="actuator_aware">Actuator-aware</option><option value="baseline">Baseline</option><option value="manual">Manual (keyboard)</option></select></div>
       <div class="row"><label for="trial">Trial number</label><input type="number" id="trial" value="0" min="0" step="1"></div>
-      <label class="check"><input type="checkbox" id="vary" checked> vary pallet and start pose per trial</label>
+      <label class="check"><input type="checkbox" id="vary"> randomise pallet and start pose per trial</label>
+      <p class="hint" id="varyhint"></p>
       <div class="btns">
         <button class="btn primary" id="play">Start</button>
         <button class="btn" id="restart">Restart</button>
@@ -126,6 +127,7 @@ kbd { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--line)
         <tr><td>Phase</td><td class="n" id="o-phase">-</td></tr>
         <tr><td>Time</td><td class="n" id="o-t">-</td></tr>
         <tr><td>Fork tip past entry edge</td><td class="n" id="o-depth">-</td></tr>
+        <tr><td>Pallet really at</td><td class="n" id="o-pallet">-</td></tr>
       </table>
       <h2>Alignment errors</h2>
       <table>
@@ -227,6 +229,11 @@ function reset() {
   const t = world.truck, b = world.pallet.blocks;
   const tol = Math.min(b[2][0] - (t.fork_spacing / 2 + t.fork_width / 2), (t.fork_spacing / 2 - t.fork_width / 2) - b[1][1]) * 1000;
   $("o-tol").textContent = `Forks have ${tol.toFixed(0)} mm of room each side inside a pocket.`;
+  const pc = world.pallet.centre;
+  $("o-pallet").textContent = `${pc[0].toFixed(2)}, ${pc[1].toFixed(2)} m, ${pc[2].toFixed(1)} deg`;
+  $("varyhint").textContent = $("vary").checked
+    ? "On: each trial moves the pallet up to 0.15 m and 20 deg, and the start up to 0.4 m and 8 deg, away from the Properties values."
+    : "Off: pallet and truck start exactly where Properties says. Trials still differ in their hidden errors and noise.";
   draw();
 }
 function take(s) {

@@ -68,6 +68,8 @@ def start(params_json: str) -> str:
     return json.dumps(dict(
         room=[cfg.room.width, cfg.room.height],
         pallet=dict(pose=[_r(v, 4) for v in _run.pallet_pose], depth=pl.depth, width=pl.width,
+                    centre=[_r(_run.pallet_centre[0], 2), _r(_run.pallet_centre[1], 2),
+                            _r(math.degrees(_run.pallet_centre[2]), 1)],
                     blocks=[list(b) for b in pl.blocks], weight=pl.weight_kg),
         truck=dict(body_rear=f.body_rear, width=f.width, heel=f.fork_heel, reach=f.reach, fork_width=f.fork_width,
                    fork_spacing=f.fork_spacing, wheelbase=f.wheelbase, rated_load=f.rated_load_kg),

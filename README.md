@@ -418,7 +418,7 @@ forksim/
   report.py       figures and results table
   webapi.py       bridge used by the web page
 web/index.html    the simulator in a browser
-tests/            12 checks, about 15 s
+tests/            13 checks, about 20 s
 ```
 
 Built with an AI coding assistant.

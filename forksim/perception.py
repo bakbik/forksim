@@ -58,6 +58,10 @@ class LidarPalletEstimator:
         self._block_c = np.array([0.5 * (a + b) for a, b in pallet.blocks])
         self._block_h = np.array([0.5 * (b - a) for a, b in pallet.blocks])
         self._wall_len = max(pallet.width, pallet.depth) + 1.0   # anything straight and longer is not a pallet
+        # Sizes that follow from this pallet type, so a wider or longer pallet is still recognised:
+        pocket = max(b[0] - a[1] for a, b in zip(pallet.blocks, pallet.blocks[1:]))
+        self._max_gap = max(0.35, pocket + 0.12)     # widest break allowed inside one edge = a fork pocket
+        self._gate = max(1.6, 0.5 * math.hypot(pallet.width, pallet.depth) + 0.85)   # tracking window radius
         self.last_edges = []     # kept for display
         self.blob = None         # nearest pallet-sized thing (x, y), robot frame, even if no entry edge is visible
 
@@ -110,7 +114,7 @@ class LidarPalletEstimator:
             order = np.argsort(s)
             idx, s = idx[order], s[order]
             # longest unbroken run of points along the line (a pocket is the widest gap allowed)
-            cuts = np.flatnonzero(np.diff(s) > 0.35)
+            cuts = np.flatnonzero(np.diff(s) > self._max_gap)
             starts, ends = np.r_[0, cuts + 1], np.r_[cuts + 1, s.size]
             r = int((ends - starts).argmax())
             run = slice(starts[r], ends[r])
@@ -155,7 +159,7 @@ class LidarPalletEstimator:
                     where the entry-edge centre is the thing being steered at)
         """
         if expect is not None:
-            near = (px - expect[0]) ** 2 + (py - expect[1]) ** 2 < 1.6 ** 2
+            near = (px - expect[0]) ** 2 + (py - expect[1]) ** 2 < self._gate ** 2
             px, py = px[near], py[near]
         edges = self.detect_edges(px, py)
         sx, sy = self.sensor_xy

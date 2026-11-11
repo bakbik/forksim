@@ -118,3 +118,13 @@ def test_web_page_loads_every_module_the_package_needs():
     listed = set(re.findall(r'"(\w+\.py)"', re.search(r"const FILES = \[(.*?)\];", html, re.S).group(1)))
     needed = {p.name for p in (ROOT / "forksim").glob("*.py")} - {"experiment.py", "report.py"}
     assert listed == needed
+
+
+def test_a_much_wider_pallet_is_still_recognised_and_loaded():
+    # pockets 0.83 m wide: the entry edge must not fall apart into three separate blocks
+    cfg = fs.override(fs.ideal(), {"pallet.width": 2.0, "variation.pallet_angle_deg": 0.0})
+    run = TrialRunner(cfg, "actuator_aware", 0)
+    seen = set()
+    while not run.step():
+        seen.update(e.kind for e in run.estimator.last_edges)
+    assert "entry" in seen and run.outcome == "success"
