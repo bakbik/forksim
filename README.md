@@ -500,6 +500,38 @@ better than it. The pickup works because the truck keeps looking as it closes
 in and trusts the near looks most. The pallet is found in 95 % of scans or more
 at 1x, and mistaken for one turned 90 deg in at most 1 %.
 
+### 9. Which half of the improvement does the work
+
+The improvement is two mechanisms: **predicting the pose across the delay**, and
+**waiting for the steered wheel** before driving. Each alone, both, and neither,
+on the same trials (`python -m forksim.ablation`, 400 trials):
+
+| Condition | Neither | Delay prediction only | Wheel waiting only | Both |
+|---|---|---|---|---|
+| Lag 480 ms, rest 1x | 55 % | 95 % | 95 % | 95 % |
+| Lag 640 ms, rest 1x | 15 % | 95 % | 90 % | 95 % |
+| Side edge ahead, 1x | 60 % | 95 % | 95 % | 95 % |
+| Control 2x, perception ideal | 25 % | 40 % | 100 % | 100 % |
+| All errors 1.5x (40 trials) | 32 % | 60 % | 78 % | 68 % |
+
+| Mean time per pickup | Neither | Delay prediction only | Wheel waiting only | Both |
+|---|---|---|---|---|
+| Lag 640 ms | 47 s | 34 s | 65 s | 48 s |
+| All errors 1.5x | 43 s | 36 s | 60 s | 61 s |
+
+- **Against lag, either mechanism is enough**, and prediction is the cheap one:
+  it restores 95 % and is faster than doing nothing, where waiting costs 20 to
+  30 seconds a pickup.
+- **Against slow steering, only waiting works.** Prediction alone gets 40 %
+  with control errors at 2x; waiting gets 100 %.
+- **Together they are no more successful than waiting alone**, but the truck
+  arrives straighter and, when lag is the problem, sooner.
+
+I had guessed the wheel-waiting did nearly all of it, including the immunity to
+lag. That was half right: it is the one that cannot be left out, but prediction
+handles lag by itself and does it for free. Cells of 20, so differences under
+about 20 points (78 % against 68 % in the last row) are not established.
+
 ![How trials end](results/fig4_outcomes.png)
 
 ![The two alignment errors as the forks reach the pallet](results/fig3_alignment.png)
@@ -629,6 +661,7 @@ forksim/
   behaviors.py    detect → approach → align, flags, the two controllers
   trial.py        one trial: runner, collision check, verdict, metrics
   experiment.py   Monte Carlo experiments
+  ablation.py     the two halves of the improvement, separately
   report.py       figures and results table
   webapi.py       bridge used by the web page
 web/index.html    the simulator in a browser

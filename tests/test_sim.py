@@ -133,7 +133,7 @@ def test_limits_follow_from_the_truck():
 def test_web_page_loads_every_module_the_package_needs():
     html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
     listed = set(re.findall(r'"(\w+\.py)"', re.search(r"const FILES = \[(.*?)\];", html, re.S).group(1)))
-    needed = {p.name for p in (ROOT / "forksim").glob("*.py")} - {"experiment.py", "report.py"}
+    needed = {p.name for p in (ROOT / "forksim").glob("*.py")} - {"experiment.py", "report.py", "ablation.py"}
     assert listed == needed
 
 
