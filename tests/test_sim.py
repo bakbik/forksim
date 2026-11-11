@@ -145,3 +145,20 @@ def test_a_much_wider_pallet_is_still_recognised_and_loaded():
     while not run.step():
         seen.update(e.kind for e in run.estimator.last_edges)
     assert "entry" in seen and run.outcome == "success"
+
+
+def test_no_approach_position_is_flagged_when_both_entry_edges_face_walls():
+    # a corridor 5 m wide with the pallet across it: both approach positions end up against a wall
+    cfg = fs.override(fs.ideal(), {"room.height": 5.0, "pallet.x": 10.0, "pallet.y": 2.5, "pallet.angle_deg": 90.0,
+                                   "forklift.x": 4.0, "forklift.y": 2.5, "forklift.angle_deg": 0.0,
+                                   "variation.pallet_pos": 0.0, "variation.pallet_angle_deg": 0.0,
+                                   "variation.start_lateral": 0.0, "variation.start_heading_deg": 0.0})
+    assert fs.run_trial(cfg, "actuator_aware", 0).outcome == "no_approach_position"
+
+
+def test_driving_out_of_the_room_ends_the_run():
+    cfg = fs.override(fs.ideal(), {"forklift.angle_deg": -90.0, "variation.start_heading_deg": 0.0})
+    run = TrialRunner(cfg, manual=True)
+    while not run.step((1.0, 0.0)):
+        pass
+    assert run.outcome == "left_room"

@@ -232,15 +232,44 @@ Nothing else differs between them.
 
 ## How a run is judged
 
-| Outcome | Meaning |
-|---|---|
-| `success` | Pallet against the carriage face, both forks in their pockets |
-| `collision_fork_face` | A fork tip hit the front of a block: lateral miss |
-| `collision_fork_wall` | A fork scraped a block from inside its pocket: angular miss |
-| `collision_side` | The truck drove at a side (wrong) edge |
-| `collision_body` | The power unit hit the pallet |
-| a flag | See above |
-| `left_room`, `timeout` | Drove out of the room, or ran past 90 s |
+A test is one pickup attempt. It is successful only if every layer accepts in
+turn and the run ends with the loading contact, outcome `success`. The first
+two layers are judged by the robot on its own estimates. The last is judged by
+the evaluator on ground truth, so the robot cannot pass by being wrong about
+where it is.
+
+### Acceptance criteria per layer
+
+| Layer | Accepted when | Judged on | Otherwise |
+|---|---|---|---|
+| **Detect** | An edge counts as an *entry* edge if its length is within 0.12 m of the pallet width and at least 80 % of its points fall on the block-pocket-block pattern; as a *side* edge if within 0.18 m of the pallet length and solid. A pallet is **confirmed** after 5 detections in a row that agree to within 0.3 m and 15 deg. An **approach position exists** if, for at least one entry edge, the spot is free of lidar returns within 0.75 m and reachable in a straight line without passing closer to the pallet than the spot itself. | Robot's detections | `no_pallet_detected` after 15 s; `no_approach_position` |
+| **Approach** | **Arrived**: at the target to within 10 mm along track, facing the edge to within 0.5 deg, stopped, wheel straight. **Accepted**: estimated yaw error no larger than half of what align could still close, given D, the minimum turning radius and the estimated lateral offset. At D = 1.5 m: 11.9 deg with no lateral offset, 9.1 deg with 100 mm, 6.2 deg with 200 mm, nothing beyond about 390 mm. | Robot's estimate | `approach_error_too_large` |
+| **Align** | **Tracking held**: a detection made from the entry edge itself, within 0.35 m and 20 deg of the tracked pallet, at least every 5 s (the truck holds still after 1 s without one). **Loaded**: the carriage face reaches the entry edge with both fork tips inside their own pockets and no collision on the way. In practice the forks must cross the entry edge within +/-30 mm laterally. | Ground truth | `lost_pallet` after 5 s; any collision |
+
+### Every way a run can end
+
+"Seen" is the count across the 2,610 trials of the main experiment, most of
+which ran at error levels well above the assumed ones.
+
+| Outcome | Raised by | Condition | Seen |
+|---|---|---|---|
+| `success` | Evaluator | Pallet against the carriage, both forks in their pockets | 1,676 |
+| `collision_fork_face` | Collision check | A fork overlaps a block by more than 5 mm with its tip less than 80 mm past the entry edge: it missed the pocket sideways | 364 |
+| `collision_fork_wall` | Collision check | The same overlap with the tip further in: it entered, then scraped a block | 120 |
+| `collision_side` | Collision check | Fork contact while heading more than 45 deg off the pallet axis: it drove at a side (wrong) edge | 1 |
+| `collision_body` | Collision check | The power unit overlaps the pallet by more than 5 mm, or the carriage reaches the pallet without the forks in their pockets | 2 |
+| `no_pallet_detected` | Detect | Nothing confirmed within 15 s | 30 |
+| `no_approach_position` | Detect | Neither entry edge has a usable approach position | 0 |
+| `approach_error_too_large` | Approach | Arrival yaw error beyond what D allows | 148 |
+| `lost_pallet` | Align | No valid entry-edge detection for 5 s | 13 |
+| `timeout` | Evaluator | Not finished after 90 s | 256 |
+| `left_room` | Evaluator | The truck's reference point left the room | 0 |
+
+At the assumed error levels (1x, 160 trials) the only failures were fork
+collisions: 10 `collision_fork_face` and 2 `collision_fork_wall`. Every other
+kind needed errors at 1.5x or more, a short or long D, or a harder start.
+`no_approach_position` and `left_room` never occurred in the experiments; each
+has a dedicated test instead.
 
 The collision check is deliberately naive: it samples the outline of the forks
 and the power unit, tests the points against the pallet, tolerates 5 mm of
@@ -665,7 +694,7 @@ forksim/
   report.py       figures and results table
   webapi.py       bridge used by the web page
 web/index.html    the simulator in a browser
-tests/            14 checks, about 5 s
+tests/            16 checks, about 6 s
 ```
 
 Built with an AI coding assistant.
